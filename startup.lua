@@ -130,8 +130,6 @@ function UserManager.setPassword(users, username, newPassword)
 end
 
 -- === TEXT EDITOR ===
--- Multiplayer/Server-safe Text Editor for CC:Tweaked
--- Only keyboard, no mouse, no setCursorBlink, no sleep, robust file handling
 
 local function textEditorScreen(filepath)
     local function safeSetCursorBlink(val)
@@ -193,11 +191,36 @@ local function textEditorScreen(filepath)
             local idx = i + scroll
             if lines[idx] then
                 local line = lines[idx]
-                if #line > w then
-                    term.write(line:sub(1, w))
+                -- Highlight cursor if this is the cursor line
+                if idx == cursorY then
+                    local before = line:sub(1, cursorX-1)
+                    local curChar = line:sub(cursorX, cursorX)
+                    if curChar == "" then curChar = " " end
+                    local after = line:sub(cursorX+1)
+                    -- Draw before cursor
+                    term.setTextColor(colors.lime)
+                    term.write(before)
+                    -- Draw cursor (inverted colors)
+                    term.setBackgroundColor(colors.lime)
+                    term.setTextColor(colors.black)
+                    term.write(curChar)
+                    term.setBackgroundColor(colors.black)
+                    term.setTextColor(colors.lime)
+                    -- Draw after cursor
+                    term.write(after)
+                    -- Fill to end of line if needed
+                    if #before + #curChar + #after < w then
+                        term.write(string.rep(" ", w - (#before + #curChar + #after)))
+                    end
                 else
-                    term.write(line)
+                    if #line > w then
+                        term.write(line:sub(1, w))
+                    else
+                        term.write(line .. string.rep(" ", w - #line))
+                    end
                 end
+            else
+                term.write(string.rep(" ", w))
             end
         end
         -- Status bar
@@ -205,7 +228,7 @@ local function textEditorScreen(filepath)
         term.setTextColor(statusColor)
         term.write(statusMsg .. string.rep(" ", w - #statusMsg))
         term.setTextColor(colors.lime)
-        -- Cursor
+        -- Cursor (set terminal cursor position for blinking if supported)
         local cx = cursorX
         local cy = cursorY - scroll
         local line = lines[cursorY] or ""
@@ -213,6 +236,9 @@ local function textEditorScreen(filepath)
         if cx > #line + 1 then cx = #line + 1 end
         if cy >= 1 and cy <= h-3 then
             term.setCursorPos(cx, cy+1)
+            safeSetCursorBlink(true)
+        else
+            safeSetCursorBlink(false)
         end
     end
 
