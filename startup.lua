@@ -1,5 +1,5 @@
--- SandTecOS - Fallout Terminal Style OS for CC:Tweaked (GUI Edition, universal user manager)
--- Author: [Your Name]
+-- SandTecOS - Fallout Terminal Style OS for CC:Tweaked 
+-- Author: SandyBoi
 -- File: startup.lua
 
 -- === CONFIGURATION ===
@@ -13,6 +13,8 @@ local PALETTE = {
     error = colors.red,
     select = colors.orange
 }
+
+local SESSION_TIMEOUT = 300 -- seconds (5 minutes)
 
 -- === GUI UTILS ===
 local function clearScreen()
@@ -55,7 +57,8 @@ local function inputBox(x, y, w, mask)
         end
         local event, p1, p2, p3 = os.pullEvent()
         if event == "char" then
-            if #input < w then
+            -- Only allow printable ASCII characters (32-126)
+            if #input < w and p1:match("^[%w%p%s]$") and #p1 == 1 and string.byte(p1) >= 32 and string.byte(p1) <= 126 then
                 input = input .. p1
             end
         elseif event == "key" then
@@ -72,7 +75,9 @@ local function inputBox(x, y, w, mask)
 end
 
 -- === USER SYSTEM ===
-local function loadUsers()
+local UserManager = {}
+
+function UserManager.load()
     if not fs.exists(USERS_FILE) then return {} end
     local f = fs.open(USERS_FILE, "r")
     local data = textutils.unserialize(f.readAll())
@@ -80,31 +85,31 @@ local function loadUsers()
     return data or {}
 end
 
-local function saveUsers(users)
+function UserManager.save(users)
     local f = fs.open(USERS_FILE, "w")
     f.write(textutils.serialize(users))
     f.close()
 end
 
-local function hashPassword(password)
+function UserManager.hashPassword(password)
     return string.reverse(password) .. "s@nd"
 end
 
-local function userExists(users, username)
+function UserManager.exists(users, username)
     for _, user in ipairs(users) do
         if user.name == username then return true end
     end
     return false
 end
 
-local function getUser(users, username)
+function UserManager.get(users, username)
     for _, user in ipairs(users) do
         if user.name == username then return user end
     end
     return nil
 end
 
-local function removeUser(users, username)
+function UserManager.remove(users, username)
     for i, user in ipairs(users) do
         if user.name == username then
             table.remove(users, i)
@@ -114,10 +119,10 @@ local function removeUser(users, username)
     return false
 end
 
-local function setUserPassword(users, username, newPassword)
+function UserManager.setPassword(users, username, newPassword)
     for i, user in ipairs(users) do
         if user.name == username then
-            users[i].pass = hashPassword(newPassword)
+            users[i].pass = UserManager.hashPassword(newPassword)
             return true
         end
     end
@@ -305,7 +310,23 @@ local function textEditorScreen(filepath)
     safeSetCursorBlink(false)
 end
 
-return textEditorScreen
+-- === MENU UTILS ===
+local function drawMenu(menu, w)
+    for _, item in ipairs(menu) do
+        local x = math.floor((w-#item.label)/2)+1
+        drawClickableText(x, item.y, item.label, false)
+    end
+end
+
+local function getMenuClick(menu, mx, my, w)
+    for _, item in ipairs(menu) do
+        local x = math.floor((w-#item.label)/2)+1
+        if isInClickable(mx, my, x, item.y, item.label) then
+            return item.label
+        end
+    end
+    return nil
+end
 
 -- === USER MANAGER ===
 local function userManagerScreen(currentUser)
@@ -315,7 +336,7 @@ local function userManagerScreen(currentUser)
     while not shouldExit do
         clearScreen()
         centerText(1, OS_NAME .. " - User Manager", PALETTE.accent)
-        local users = loadUsers()
+        local users = UserManager.load()
         table.sort(users, function(a, b) return a.name < b.name end)
         local yStart = 4
         local btns = {}
@@ -356,15 +377,15 @@ local function userManagerScreen(currentUser)
                 if uname == "" then
                     centerText(h-3, "Username cannot be empty!", PALETTE.error)
                     sleep(1)
-                elseif userExists(users, uname) then
+                elseif UserManager.exists(users, uname) then
                     centerText(h-3, "User already exists!", PALETTE.error)
                     sleep(1)
                 else
                     centerText(h-3, "Enter password:", PALETTE.select)
                     term.setCursorPos(2, h-2)
                     local upass = inputBox(2, h-2, 16, true)
-                    table.insert(users, {name=uname, pass=hashPassword(upass)})
-                    saveUsers(users)
+                    table.insert(users, {name=uname, pass=UserManager.hashPassword(upass)})
+                    UserManager.save(users)
                     centerText(h-3, "User added!", PALETTE.accent)
                     sleep(1)
                 end
@@ -377,8 +398,8 @@ local function userManagerScreen(currentUser)
                     centerText(h-3, "Cannot delete yourself!", PALETTE.error)
                     sleep(1)
                 else
-                    removeUser(users, selectedUser)
-                    saveUsers(users)
+                    UserManager.remove(users, selectedUser)
+                    UserManager.save(users)
                     centerText(h-3, "User deleted!", PALETTE.accent)
                     sleep(1)
                     selectedUser = nil
@@ -392,8 +413,8 @@ local function userManagerScreen(currentUser)
                     centerText(h-3, "Enter new password:", PALETTE.select)
                     term.setCursorPos(2, h-2)
                     local upass = inputBox(2, h-2, 16, true)
-                    setUserPassword(users, selectedUser, upass)
-                    saveUsers(users)
+                    UserManager.setPassword(users, selectedUser, upass)
+                    UserManager.save(users)
                     centerText(h-3, "Password changed!", PALETTE.accent)
                     sleep(1)
                 end
@@ -482,36 +503,38 @@ local function desktopScreen(user)
             {label="Users", y=9},
             {label="Logout", y=11}
         }
-        for _, item in ipairs(menu) do
-            drawClickableText(math.floor((w-#item.label)/2)+1, item.y, item.label, false)
-        end
+        drawMenu(menu, w)
         local waiting = true
+        local lastActivity = os.clock()
         while waiting do
-            local event, b, mx, my = os.pullEvent()
+            local timeout = SESSION_TIMEOUT - (os.clock() - lastActivity)
+            if timeout <= 0 then
+                centerText(h, "Session timed out. Returning to login...", PALETTE.error)
+                sleep(2)
+                return
+            end
+            local event, b, mx, my = os.pullEventRaw()
+            if event == "terminate" then error("Terminated") end
+            if event == "mouse_click" or event == "key" then
+                lastActivity = os.clock()
+            end
             if event == "mouse_click" and b == 1 then
-                for _, item in ipairs(menu) do
-                    local x = math.floor((w-#item.label)/2)+1
-                    if isInClickable(mx, my, x, item.y, item.label) then
-                        if item.label == "File Manager" then
-                            fileManagerScreen()
-                            clearScreen()
-                            centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
-                            centerText(4, "User: " .. user.name, PALETTE.border)
-                            for _, item2 in ipairs(menu) do
-                                drawClickableText(math.floor((w-#item2.label)/2)+1, item2.y, item2.label, false)
-                            end
-                        elseif item.label == "Users" then
-                            userManagerScreen(user.name)
-                            clearScreen()
-                            centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
-                            centerText(4, "User: " .. user.name, PALETTE.border)
-                            for _, item2 in ipairs(menu) do
-                                drawClickableText(math.floor((w-#item2.label)/2)+1, item2.y, item2.label, false)
-                            end
-                        elseif item.label == "Logout" then
-                            return
-                        end
-                        break
+                local clickedLabel = getMenuClick(menu, mx, my, w)
+                if clickedLabel then
+                    if clickedLabel == "File Manager" then
+                        fileManagerScreen()
+                        clearScreen()
+                        centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
+                        centerText(4, "User: " .. user.name, PALETTE.border)
+                        drawMenu(menu, w)
+                    elseif clickedLabel == "Users" then
+                        userManagerScreen(user.name)
+                        clearScreen()
+                        centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
+                        centerText(4, "User: " .. user.name, PALETTE.border)
+                        drawMenu(menu, w)
+                    elseif clickedLabel == "Logout" then
+                        return
                     end
                 end
             end
@@ -526,7 +549,7 @@ local function authScreen()
         local w, h = term.getSize()
         centerText(2, OS_NAME, PALETTE.accent)
         centerText(4, "Welcome!", PALETTE.fg)
-        local users = loadUsers()
+        local users = UserManager.load()
         local menu
         if #users == 0 then
             -- Первый запуск: разрешить регистрацию
@@ -541,32 +564,28 @@ local function authScreen()
                 {label="Exit", y=11}
             }
         end
-        for _, item in ipairs(menu) do
-            drawClickableText(math.floor((w-#item.label)/2)+1, item.y, item.label, false)
-        end
+        drawMenu(menu, w)
         while true do
             local event, b, mx, my = os.pullEvent()
             if event == "mouse_click" and b == 1 then
-                for _, item in ipairs(menu) do
-                    local x = math.floor((w-#item.label)/2)+1
-                    if isInClickable(mx, my, x, item.y, item.label) then
-                        if item.label == "Login" then
-                            local user = loginScreen()
-                            if user then return user end
-                        elseif item.label == "Register" then
-                            registerScreen()
-                            -- После регистрации обновляем список пользователей и предлагаем войти
-                            local user
-                            repeat
-                                user = loginScreen()
-                            until user
-                            return user
-                        elseif item.label == "Exit" then
-                            clearScreen()
-                            error("Exiting SandTecOS")
-                        end
-                        break
+                local clickedLabel = getMenuClick(menu, mx, my, w)
+                if clickedLabel then
+                    if clickedLabel == "Login" then
+                        local user = loginScreen()
+                        if user then return user end
+                    elseif clickedLabel == "Register" then
+                        registerScreen()
+                        -- После регистрации обновляем список пользователей и предлагаем войти
+                        local user
+                        repeat
+                            user = loginScreen()
+                        until user
+                        return user
+                    elseif clickedLabel == "Exit" then
+                        clearScreen()
+                        error("Exiting SandTecOS")
                     end
+                    break
                 end
             end
         end
@@ -584,9 +603,9 @@ function loginScreen()
     term.setCursorPos(math.floor(w/2)-10, 8)
     term.write("Password: ")
     local password = inputBox(math.floor(w/2), 8, 16, true)
-    local users = loadUsers()
-    local user = getUser(users, username)
-    if user and user.pass == hashPassword(password) then
+    local users = UserManager.load()
+    local user = UserManager.get(users, username)
+    if user and user.pass == UserManager.hashPassword(password) then
         centerText(10, "Login successful!", PALETTE.accent)
         sleep(1)
         return user
@@ -608,14 +627,14 @@ function registerScreen()
     term.setCursorPos(math.floor(w/2)-10, 8)
     term.write("Password: ")
     local password = inputBox(math.floor(w/2), 8, 16, true)
-    local users = loadUsers()
-    if userExists(users, username) then
+    local users = UserManager.load()
+    if UserManager.exists(users, username) then
         centerText(10, "User already exists!", PALETTE.error)
         sleep(1.5)
         return
     end
-    table.insert(users, {name=username, pass=hashPassword(password)})
-    saveUsers(users)
+    table.insert(users, {name=username, pass=UserManager.hashPassword(password)})
+    UserManager.save(users)
     centerText(10, "User registered!", PALETTE.accent)
     sleep(1.5)
 end
