@@ -124,17 +124,51 @@ local function setUserPassword(users, username, newPassword)
     return false
 end
 
--- === TEXT EDITOR (Improved, with robust bounds protection and error diagnostics) ===
+-- === TEXT EDITOR ===
+-- Multiplayer/Server-safe Text Editor for CC:Tweaked
+-- Only keyboard, no mouse, no setCursorBlink, no sleep, robust file handling
+
 local function textEditorScreen(filepath)
-    clearScreen()
-    local w, h = term.getSize()
-    local lines = {}
-    if fs.exists(filepath) then
-        local f = fs.open(filepath, "r")
-        for line in f.readLine, f do
-            table.insert(lines, line)
+    local function safeSetCursorBlink(val)
+        if term.setCursorBlink then
+            pcall(term.setCursorBlink, val)
         end
-        f.close()
+    end
+
+    local function safeSleep(t)
+        if sleep then
+            pcall(sleep, t)
+        end
+    end
+
+    local function safeOpen(path, mode)
+        local ok, f = pcall(fs.open, path, mode)
+        if ok and f then return f end
+        return nil
+    end
+
+    local function safeGetSize()
+        local ok, w, h = pcall(term.getSize)
+        if ok and w and h then return w, h end
+        return 51, 19 -- fallback
+    end
+
+    local w, h = safeGetSize()
+    local lines = {}
+    local statusMsg = ""
+    local statusColor = colors.lime
+
+    -- Load file
+    do
+        local f = safeOpen(filepath, "r")
+        if f then
+            while true do
+                local line = f.readLine()
+                if not line then break end
+                table.insert(lines, line)
+            end
+            f.close()
+        end
     end
     if #lines == 0 then lines = {""} end
 
@@ -142,65 +176,57 @@ local function textEditorScreen(filepath)
     local scroll = 0
     local editing = true
 
-    local saveLabel = "Save"
-    local exitLabel = "Exit"
-    local saveX = 2
-    local saveY = h-2
-    local exitX = 10
-    local exitY = h-2
-
     local function redraw()
-        clearScreen()
-        centerText(1, OS_NAME .. " - Text Editor", PALETTE.accent)
-        term.setCursorPos(2, 2)
-        term.setTextColor(PALETTE.border)
-        term.write("File: " .. filepath)
-        term.setTextColor(PALETTE.fg)
-        -- Draw lines with cropping
-        for i=1, h-6 do
-            term.setCursorPos(2, i+2)
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.lime)
+        term.clear()
+        term.setCursorPos(1,1)
+        term.write("Text Editor - " .. filepath)
+        -- Draw lines
+        for i=1, h-3 do
+            term.setCursorPos(1, i+1)
             local idx = i + scroll
             if lines[idx] then
                 local line = lines[idx]
-                if #line > w-2 then
-                    term.write(line:sub(1, w-2))
+                if #line > w then
+                    term.write(line:sub(1, w))
                 else
                     term.write(line)
                 end
-            else
-                term.write("")
             end
         end
-        -- Draw buttons
-        drawClickableText(saveX, saveY, saveLabel, false)
-        drawClickableText(exitX, exitY, exitLabel, false)
-        -- Draw hotkey hint
-        term.setCursorPos(2, h-4)
-        term.setTextColor(PALETTE.border)
-        term.write("Ctrl+S: Save   Ctrl+Q: Exit")
-        term.setTextColor(PALETTE.fg)
-        -- Set cursor
+        -- Status bar
+        term.setCursorPos(1, h-1)
+        term.setTextColor(statusColor)
+        term.write(statusMsg .. string.rep(" ", w - #statusMsg))
+        term.setTextColor(colors.lime)
+        -- Cursor
         local cx = cursorX
         local cy = cursorY - scroll
         local line = lines[cursorY] or ""
         if cx < 1 then cx = 1 end
         if cx > #line + 1 then cx = #line + 1 end
-        if cy >= 1 and cy <= h-6 then
-            term.setCursorPos(cx+1, cy+2)
-            if term.setCursorBlink then term.setCursorBlink(true) end
-        else
-            if term.setCursorBlink then term.setCursorBlink(false) end
+        if cy >= 1 and cy <= h-3 then
+            term.setCursorPos(cx, cy+1)
         end
     end
 
+    local function setStatus(msg, color)
+        statusMsg = msg or ""
+        statusColor = color or colors.lime
+    end
+
     local function saveFile()
-        local f = fs.open(filepath, "w")
+        local f = safeOpen(filepath, "w")
+        if not f then
+            setStatus("Error: Cannot write file!", colors.red)
+            return
+        end
         for i=1, #lines do
             f.writeLine(lines[i])
         end
         f.close()
-        centerText(h-5, "Saved!", PALETTE.accent)
-        sleep(0.5)
+        setStatus("Saved!", colors.yellow)
     end
 
     local function clampCursor()
@@ -212,15 +238,12 @@ local function textEditorScreen(filepath)
         if cursorX > #line + 1 then cursorX = #line + 1 end
     end
 
+    setStatus("F2: Save | F3: Exit | Arrows: Move | Enter: New line | Backspace: Del", colors.lime)
+    safeSetCursorBlink(false)
     redraw()
     while editing do
         redraw()
-        local ok, event, p1, p2, p3 = pcall(os.pullEvent)
-        if not ok then
-            centerText(h-3, "Error: "..tostring(event), PALETTE.error)
-            sleep(2)
-            break
-        end
+        local event, p1 = os.pullEvent()
         if event == "char" then
             local line = lines[cursorY] or ""
             lines[cursorY] = line:sub(1, cursorX-1) .. p1 .. line:sub(cursorX)
@@ -247,7 +270,7 @@ local function textEditorScreen(filepath)
                     cursorY = cursorY + 1
                     local line = lines[cursorY] or ""
                     if cursorX > #line+1 then cursorX = #line+1 end
-                    if cursorY - scroll > h-6 then scroll = scroll + 1 end
+                    if cursorY - scroll > h-3 then scroll = scroll + 1 end
                 end
             elseif p1 == keys.backspace then
                 local line = lines[cursorY] or ""
@@ -270,32 +293,21 @@ local function textEditorScreen(filepath)
                 table.insert(lines, cursorY+1, after)
                 cursorY = cursorY + 1
                 cursorX = 1
-                if cursorY - scroll > h-6 then scroll = scroll + 1 end
-            elseif p1 == keys.s and (p2 and p2 == true or (p3 and p3 == true)) then -- Ctrl+S
+                if cursorY - scroll > h-3 then scroll = scroll + 1 end
+            elseif p1 == keys.f2 then
                 saveFile()
-            elseif p1 == keys.q and (p2 and p2 == true or (p3 and p3 == true)) then -- Ctrl+Q
+            elseif p1 == keys.f3 then
                 editing = false
-            end
-        elseif event == "mouse_click" and p1 == 1 then
-            if isInClickable(p2, p3, saveX, saveY, saveLabel) then
-                saveFile()
-            elseif isInClickable(p2, p3, exitX, exitY, exitLabel) then
-                editing = false
-            elseif p3 >= 3 and p3 <= h-4 and p2 >= 2 then
-                local ly = p3 - 2 + scroll
-                if ly >= 1 and ly <= #lines then
-                    cursorY = ly
-                    local line = lines[cursorY] or ""
-                    cursorX = math.min(#line+1, p2-1)
-                end
             end
         end
         clampCursor()
     end
-    if term.setCursorBlink then term.setCursorBlink(false) end
+    safeSetCursorBlink(false)
 end
 
--- === USER MANAGER (universal, cannot delete self) ===
+return textEditorScreen
+
+-- === USER MANAGER ===
 local function userManagerScreen(currentUser)
     local w, h = term.getSize()
     local shouldExit = false
