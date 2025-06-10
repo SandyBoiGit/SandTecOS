@@ -124,7 +124,7 @@ local function setUserPassword(users, username, newPassword)
     return false
 end
 
--- === TEXT EDITOR (Improved, with robust bounds protection) ===
+-- === TEXT EDITOR (Improved, with robust bounds protection and error diagnostics) ===
 local function textEditorScreen(filepath)
     clearScreen()
     local w, h = term.getSize()
@@ -187,9 +187,9 @@ local function textEditorScreen(filepath)
         if cx > #line + 1 then cx = #line + 1 end
         if cy >= 1 and cy <= h-6 then
             term.setCursorPos(cx+1, cy+2)
-            term.setCursorBlink(true)
+            if term.setCursorBlink then term.setCursorBlink(true) end
         else
-            term.setCursorBlink(false)
+            if term.setCursorBlink then term.setCursorBlink(false) end
         end
     end
 
@@ -203,10 +203,24 @@ local function textEditorScreen(filepath)
         sleep(0.5)
     end
 
+    local function clampCursor()
+        if cursorY < 1 then cursorY = 1 end
+        if cursorY > #lines then cursorY = #lines end
+        if not lines[cursorY] then lines[cursorY] = "" end
+        local line = lines[cursorY]
+        if cursorX < 1 then cursorX = 1 end
+        if cursorX > #line + 1 then cursorX = #line + 1 end
+    end
+
     redraw()
     while editing do
         redraw()
-        local event, p1, p2, p3 = os.pullEvent()
+        local ok, event, p1, p2, p3 = pcall(os.pullEvent)
+        if not ok then
+            centerText(h-3, "Error: "..tostring(event), PALETTE.error)
+            sleep(2)
+            break
+        end
         if event == "char" then
             local line = lines[cursorY] or ""
             lines[cursorY] = line:sub(1, cursorX-1) .. p1 .. line:sub(cursorX)
@@ -276,15 +290,9 @@ local function textEditorScreen(filepath)
                 end
             end
         end
-        -- === Robust bounds protection ===
-        if cursorY < 1 then cursorY = 1 end
-        if cursorY > #lines then cursorY = #lines end
-        if not lines[cursorY] then lines[cursorY] = "" end
-        local line = lines[cursorY]
-        if cursorX < 1 then cursorX = 1 end
-        if cursorX > #line + 1 then cursorX = #line + 1 end
+        clampCursor()
     end
-    term.setCursorBlink(false)
+    if term.setCursorBlink then term.setCursorBlink(false) end
 end
 
 -- === USER MANAGER (universal, cannot delete self) ===
@@ -608,5 +616,20 @@ local function main()
     end
 end
 
--- === START OS ===
-main()
+-- === START OS WITH ERROR HANDLING ===
+local function safeMain()
+    local ok, err = pcall(main)
+    if not ok then
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.red)
+        term.clear()
+        term.setCursorPos(1,1)
+        print("SandTecOS crashed with error:")
+        print(err)
+        print("\nPress any key to reboot...")
+        os.pullEvent("key")
+        os.reboot()
+    end
+end
+
+safeMain()
