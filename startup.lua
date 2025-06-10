@@ -1,5 +1,5 @@
--- SandTecOS - Fallout Terminal Style OS for CC:Tweaked 
--- Author: SandyBoi
+-- SandTecOS - Fallout Terminal Style OS for CC:Tweaked (GUI Edition, universal user manager)
+-- Author: [Your Name]
 -- File: startup.lua
 
 -- === CONFIGURATION ===
@@ -124,7 +124,8 @@ local function setUserPassword(users, username, newPassword)
     return false
 end
 
--- === TEXT EDITOR ===
+
+-- === TEXT EDITOR (Improved) ===
 local function textEditorScreen(filepath)
     clearScreen()
     local w, h = term.getSize()
@@ -156,17 +157,30 @@ local function textEditorScreen(filepath)
         term.setTextColor(PALETTE.border)
         term.write("File: " .. filepath)
         term.setTextColor(PALETTE.fg)
+        -- Draw lines with cropping
         for i=1, h-6 do
             term.setCursorPos(2, i+2)
             local idx = i + scroll
             if lines[idx] then
-                term.write(lines[idx])
+                local line = lines[idx]
+                if #line > w-2 then
+                    term.write(line:sub(1, w-2))
+                else
+                    term.write(line)
+                end
             else
                 term.write("")
             end
         end
+        -- Draw buttons
         drawClickableText(saveX, saveY, saveLabel, false)
         drawClickableText(exitX, exitY, exitLabel, false)
+        -- Draw hotkey hint
+        term.setCursorPos(2, h-4)
+        term.setTextColor(PALETTE.border)
+        term.write("Ctrl+S: Save   Ctrl+Q: Exit")
+        term.setTextColor(PALETTE.fg)
+        -- Set cursor
         local cx = cursorX
         local cy = cursorY - scroll
         if cy >= 1 and cy <= h-6 then
@@ -175,6 +189,16 @@ local function textEditorScreen(filepath)
         else
             term.setCursorBlink(false)
         end
+    end
+
+    local function saveFile()
+        local f = fs.open(filepath, "w")
+        for i=1, #lines do
+            f.writeLine(lines[i])
+        end
+        f.close()
+        centerText(h-5, "Saved!", PALETTE.accent)
+        sleep(0.5)
     end
 
     redraw()
@@ -231,16 +255,14 @@ local function textEditorScreen(filepath)
                 cursorY = cursorY + 1
                 cursorX = 1
                 if cursorY - scroll > h-6 then scroll = scroll + 1 end
+            elseif p1 == keys.s and (p2 and p2 == true or (p3 and p3 == true)) then -- Ctrl+S
+                saveFile()
+            elseif p1 == keys.q and (p2 and p2 == true or (p3 and p3 == true)) then -- Ctrl+Q
+                editing = false
             end
         elseif event == "mouse_click" and p1 == 1 then
             if isInClickable(p2, p3, saveX, saveY, saveLabel) then
-                local f = fs.open(filepath, "w")
-                for i=1, #lines do
-                    f.write(lines[i].."\n")
-                end
-                f.close()
-                centerText(h-4, "Saved!", PALETTE.accent)
-                sleep(0.5)
+                saveFile()
             elseif isInClickable(p2, p3, exitX, exitY, exitLabel) then
                 editing = false
             elseif p3 >= 3 and p3 <= h-4 and p2 >= 2 then
