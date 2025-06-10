@@ -124,8 +124,7 @@ local function setUserPassword(users, username, newPassword)
     return false
 end
 
-
--- === TEXT EDITOR (Improved) ===
+-- === TEXT EDITOR (Improved, with cursor bounds protection) ===
 local function textEditorScreen(filepath)
     clearScreen()
     local w, h = term.getSize()
@@ -183,6 +182,9 @@ local function textEditorScreen(filepath)
         -- Set cursor
         local cx = cursorX
         local cy = cursorY - scroll
+        local line = lines[cursorY] or ""
+        if cx < 1 then cx = 1 end
+        if cx > #line + 1 then cx = #line + 1 end
         if cy >= 1 and cy <= h-6 then
             term.setCursorPos(cx+1, cy+2)
             term.setCursorBlink(true)
@@ -274,6 +276,13 @@ local function textEditorScreen(filepath)
                 end
             end
         end
+        -- Ограничиваем курсор по Y
+        if cursorY < 1 then cursorY = 1 end
+        if cursorY > #lines then cursorY = #lines end
+        -- Ограничиваем курсор по X
+        local line = lines[cursorY] or ""
+        if cursorX < 1 then cursorX = 1 end
+        if cursorX > #line + 1 then cursorX = #line + 1 end
     end
     term.setCursorBlink(false)
 end
