@@ -124,7 +124,7 @@ local function setUserPassword(users, username, newPassword)
     return false
 end
 
--- === TEXT EDITOR (Improved, with cursor bounds protection) ===
+-- === TEXT EDITOR (Improved, with robust bounds protection) ===
 local function textEditorScreen(filepath)
     clearScreen()
     local w, h = term.getSize()
@@ -241,7 +241,7 @@ local function textEditorScreen(filepath)
                     lines[cursorY] = line:sub(1, cursorX-2) .. line:sub(cursorX)
                     cursorX = cursorX - 1
                 elseif cursorY > 1 then
-                    local prevLine = lines[cursorY-1]
+                    local prevLine = lines[cursorY-1] or ""
                     local prevLen = #prevLine
                     lines[cursorY-1] = prevLine .. line
                     table.remove(lines, cursorY)
@@ -276,11 +276,11 @@ local function textEditorScreen(filepath)
                 end
             end
         end
-        -- Ограничиваем курсор по Y
+        -- === Robust bounds protection ===
         if cursorY < 1 then cursorY = 1 end
         if cursorY > #lines then cursorY = #lines end
-        -- Ограничиваем курсор по X
-        local line = lines[cursorY] or ""
+        if not lines[cursorY] then lines[cursorY] = "" end
+        local line = lines[cursorY]
         if cursorX < 1 then cursorX = 1 end
         if cursorX > #line + 1 then cursorX = #line + 1 end
     end
