@@ -1,10 +1,11 @@
--- SandTecOS - Fallout Terminal Style OS for CC:Tweaked 
--- Author: SandyBoi
+-- SandTecOS - Fallout Terminal Style OS for CC:Tweaked
+-- Author: SandyBoi (modded by Qodo)
 -- File: startup.lua
 
 -- === CONFIGURATION ===
 local OS_NAME = "SandTecOS"
 local USERS_FILE = "/sandtecos_users"
+local USERS_DIR = "/users"
 local PALETTE = {
     bg = colors.black,
     fg = colors.lime,
@@ -13,7 +14,6 @@ local PALETTE = {
     error = colors.red,
     select = colors.orange
 }
-
 local SESSION_TIMEOUT = 300 -- seconds (5 minutes)
 
 -- === GUI UTILS ===
@@ -92,6 +92,7 @@ function UserManager.save(users)
 end
 
 function UserManager.hashPassword(password)
+    if not password or password == "" then return "" end
     return string.reverse(password) .. "s@nd"
 end
 
@@ -129,8 +130,48 @@ function UserManager.setPassword(users, username, newPassword)
     return false
 end
 
--- === TEXT EDITOR ===
+function UserManager.setAdmin(users, username, isAdmin)
+    for i, user in ipairs(users) do
+        if user.name == username then
+            users[i].admin = isAdmin and true or false
+            return true
+        end
+    end
+    return false
+end
 
+function UserManager.createUserDir(username)
+    local userDir = fs.combine(USERS_DIR, username)
+    if not fs.exists(USERS_DIR) then fs.makeDir(USERS_DIR) end
+    if not fs.exists(userDir) then fs.makeDir(userDir) end
+end
+
+function UserManager.deleteUserDir(username)
+    local userDir = fs.combine(USERS_DIR, username)
+    if fs.exists(userDir) then
+        local function recursiveDelete(path)
+            if fs.isDir(path) then
+                for _, f in ipairs(fs.list(path)) do
+                    recursiveDelete(fs.combine(path, f))
+                end
+                fs.delete(path)
+            else
+                fs.delete(path)
+            end
+        end
+        recursiveDelete(userDir)
+    end
+end
+
+function UserManager.countAdmins(users)
+    local count = 0
+    for _, user in ipairs(users) do
+        if user.admin then count = count + 1 end
+    end
+    return count
+end
+
+-- === TEXT EDITOR ===
 local function textEditorScreen(filepath)
     local function safeSetCursorBlink(val)
         if term.setCursorBlink then
@@ -359,33 +400,51 @@ local function userManagerScreen(currentUser)
     local w, h = term.getSize()
     local shouldExit = false
     local selectedUser = nil
+    local users = UserManager.load()
+    local currentUserObj = UserManager.get(users, currentUser)
+    local isAdmin = currentUserObj and currentUserObj.admin
+
     while not shouldExit do
         clearScreen()
         centerText(1, OS_NAME .. " - User Manager", PALETTE.accent)
-        local users = UserManager.load()
+        users = UserManager.load()
         table.sort(users, function(a, b) return a.name < b.name end)
         local yStart = 4
         local btns = {}
         for i, user in ipairs(users) do
             local label = user.name
+            if user.admin then label = label .. " [admin]" end
+            if user.pass == "" then label = label .. " (no pass)" end
             local x = 4
             local y = yStart + i - 1
             drawClickableText(x, y, label, selectedUser == user.name)
             table.insert(btns, {x=x, y=y, label=label, name=user.name})
         end
+
+        -- Admins see all controls, users see only password change for self
         local addLabel = "Add User"
         local delLabel = "Delete User"
         local passLabel = "Set Password"
+        local adminLabel = "Toggle Admin"
         local exitLabel = "Exit"
-        local addX, addY = 2, h-4
-        local delX, delY = 14, h-4
-        local passX, passY = 30, h-4
+        local addX, addY = 2, h-5
+        local delX, delY = 14, h-5
+        local passX, passY = 30, h-5
+        local adminX, adminY = 48, h-5
         local exitX, exitY = 2, h-2
-        drawClickableText(addX, addY, addLabel, false)
-        drawClickableText(delX, delY, delLabel, false)
-        drawClickableText(passX, passY, passLabel, false)
-        drawClickableText(exitX, exitY, exitLabel, false)
-        centerText(h-1, "Select user above, then Delete/Set Password. Add creates new user.", PALETTE.border)
+
+        if isAdmin then
+            drawClickableText(addX, addY, addLabel, false)
+            drawClickableText(delX, delY, delLabel, false)
+            drawClickableText(passX, passY, passLabel, false)
+            drawClickableText(adminX, adminY, adminLabel, false)
+            drawClickableText(exitX, exitY, exitLabel, false)
+            centerText(h-1, "Admins: Add/Del/SetPass/ToggleAdmin. Users: Only change own password.", PALETTE.border)
+        else
+            drawClickableText(passX, passY, passLabel, false)
+            drawClickableText(exitX, exitY, exitLabel, false)
+            centerText(h-1, "Select yourself and Set Password. Other actions unavailable.", PALETTE.border)
+        end
 
         local event, b, mx, my = os.pullEvent()
         if event == "mouse_click" and b == 1 then
@@ -395,72 +454,127 @@ local function userManagerScreen(currentUser)
                     selectedUser = btn.name
                 end
             end
-            -- Add User
-            if isInClickable(mx, my, addX, addY, addLabel) then
-                centerText(h-3, "Enter new username:", PALETTE.select)
-                term.setCursorPos(2, h-2)
-                local uname = inputBox(2, h-2, 16, false)
-                if uname == "" then
-                    centerText(h-3, "Username cannot be empty!", PALETTE.error)
-                    sleep(1)
-                elseif UserManager.exists(users, uname) then
-                    centerText(h-3, "User already exists!", PALETTE.error)
-                    sleep(1)
-                else
-                    centerText(h-3, "Enter password:", PALETTE.select)
+            users = UserManager.load()
+            -- Admin controls
+            if isAdmin then
+                -- Add User
+                if isInClickable(mx, my, addX, addY, addLabel) then
+                    centerText(h-3, "Enter new username:", PALETTE.select)
                     term.setCursorPos(2, h-2)
-                    local upass = inputBox(2, h-2, 16, true)
-                    table.insert(users, {name=uname, pass=UserManager.hashPassword(upass)})
-                    UserManager.save(users)
-                    centerText(h-3, "User added!", PALETTE.accent)
-                    sleep(1)
+                    local uname = inputBox(2, h-2, 16, false)
+                    if uname == "" then
+                        centerText(h-3, "Username cannot be empty!", PALETTE.error)
+                        sleep(1)
+                    elseif uname:find("[^%w_]") then
+                        centerText(h-3, "ASCII letters, digits, _ only!", PALETTE.error)
+                        sleep(1)
+                    elseif UserManager.exists(users, uname) then
+                        centerText(h-3, "User already exists!", PALETTE.error)
+                        sleep(1)
+                    else
+                        centerText(h-3, "Enter password (empty = no pass):", PALETTE.select)
+                        term.setCursorPos(2, h-2)
+                        local upass = inputBox(2, h-2, 16, true)
+                        -- Первый пользователь всегда admin
+                        local isFirst = #users == 0
+                        table.insert(users, {name=uname, pass=UserManager.hashPassword(upass), admin=isFirst})
+                        UserManager.save(users)
+                        UserManager.createUserDir(uname)
+                        centerText(h-3, "User added!", PALETTE.accent)
+                        sleep(1)
+                    end
+                -- Delete User
+                elseif isInClickable(mx, my, delX, delY, delLabel) then
+                    if not selectedUser then
+                        centerText(h-3, "Select user to delete!", PALETTE.error)
+                        sleep(1)
+                    elseif selectedUser == currentUser then
+                        centerText(h-3, "Cannot delete yourself!", PALETTE.error)
+                        sleep(1)
+                    else
+                        -- Prevent deleting last admin
+                        local userToDel = UserManager.get(users, selectedUser)
+                        if userToDel and userToDel.admin and UserManager.countAdmins(users) == 1 then
+                            centerText(h-3, "Cannot delete last admin!", PALETTE.error)
+                            sleep(1)
+                        else
+                            UserManager.remove(users, selectedUser)
+                            UserManager.save(users)
+                            UserManager.deleteUserDir(selectedUser)
+                            centerText(h-3, "User deleted!", PALETTE.accent)
+                            sleep(1)
+                            selectedUser = nil
+                        end
+                    end
+                -- Set Password
+                elseif isInClickable(mx, my, passX, passY, passLabel) then
+                    if not selectedUser then
+                        centerText(h-3, "Select user to set password!", PALETTE.error)
+                        sleep(1)
+                    else
+                        centerText(h-3, "Enter new password (empty = no pass):", PALETTE.select)
+                        term.setCursorPos(2, h-2)
+                        local upass = inputBox(2, h-2, 16, true)
+                        UserManager.setPassword(users, selectedUser, upass)
+                        UserManager.save(users)
+                        centerText(h-3, "Password changed!", PALETTE.accent)
+                        sleep(1)
+                    end
+                -- Toggle Admin
+                elseif isInClickable(mx, my, adminX, adminY, adminLabel) then
+                    if not selectedUser then
+                        centerText(h-3, "Select user to toggle admin!", PALETTE.error)
+                        sleep(1)
+                    elseif selectedUser == currentUser then
+                        centerText(h-3, "Cannot change your own admin status!", PALETTE.error)
+                        sleep(1)
+                    else
+                        local userObj = UserManager.get(users, selectedUser)
+                        if userObj then
+                            if userObj.admin and UserManager.countAdmins(users) == 1 then
+                                centerText(h-3, "Cannot remove last admin!", PALETTE.error)
+                                sleep(1)
+                            else
+                                UserManager.setAdmin(users, selectedUser, not userObj.admin)
+                                UserManager.save(users)
+                                centerText(h-3, "Admin status toggled!", PALETTE.accent)
+                                sleep(1)
+                            end
+                        end
+                    end
+                -- Exit
+                elseif isInClickable(mx, my, exitX, exitY, exitLabel) then
+                    shouldExit = true
                 end
-            -- Delete User
-            elseif isInClickable(mx, my, delX, delY, delLabel) then
-                if not selectedUser then
-                    centerText(h-3, "Select user to delete!", PALETTE.error)
-                    sleep(1)
-                elseif selectedUser == currentUser then
-                    centerText(h-3, "Cannot delete yourself!", PALETTE.error)
-                    sleep(1)
-                else
-                    UserManager.remove(users, selectedUser)
-                    UserManager.save(users)
-                    centerText(h-3, "User deleted!", PALETTE.accent)
-                    sleep(1)
-                    selectedUser = nil
+            else
+                -- User controls: only set own password
+                if isInClickable(mx, my, passX, passY, passLabel) then
+                    if selectedUser ~= currentUser then
+                        centerText(h-3, "Can only change your own password!", PALETTE.error)
+                        sleep(1)
+                    else
+                        centerText(h-3, "Enter new password (empty = no pass):", PALETTE.select)
+                        term.setCursorPos(2, h-2)
+                        local upass = inputBox(2, h-2, 16, true)
+                        UserManager.setPassword(users, currentUser, upass)
+                        UserManager.save(users)
+                        centerText(h-3, "Password changed!", PALETTE.accent)
+                        sleep(1)
+                    end
+                elseif isInClickable(mx, my, exitX, exitY, exitLabel) then
+                    shouldExit = true
                 end
-            -- Set Password
-            elseif isInClickable(mx, my, passX, passY, passLabel) then
-                if not selectedUser then
-                    centerText(h-3, "Select user to set password!", PALETTE.error)
-                    sleep(1)
-                else
-                    centerText(h-3, "Enter new password:", PALETTE.select)
-                    term.setCursorPos(2, h-2)
-                    local upass = inputBox(2, h-2, 16, true)
-                    UserManager.setPassword(users, selectedUser, upass)
-                    UserManager.save(users)
-                    centerText(h-3, "Password changed!", PALETTE.accent)
-                    sleep(1)
-                end
-            -- Exit
-            elseif isInClickable(mx, my, exitX, exitY, exitLabel) then
-                shouldExit = true
             end
         end
     end
 end
 
 -- === FILE MANAGER ===
-
 local function isTextFile(filename)
-    -- Extend this list as needed
     return filename:match("%.txt$") or filename:match("%.lua$") or filename:match("%.cfg$") or filename:match("%.log$") or filename:match("%.json$") or not filename:find("%.[^%.]+$")
 end
 
 local function isExecutableFile(filename)
-    -- Consider .lua and .exe as executable, extend as needed
     return filename:match("%.lua$") or filename:match("%.exe$")
 end
 
@@ -521,9 +635,11 @@ local function createFileDialog(currentPath)
     end
 end
 
-local function fileManagerScreen()
+local function fileManagerScreen(user)
     local w, h = term.getSize()
-    local currentPath = "/"
+    local userRoot = fs.combine(USERS_DIR, user.name)
+    if not fs.exists(userRoot) then fs.makeDir(userRoot) end
+    local currentPath = user.admin and "/" or userRoot
     local shouldExit = false
     local selectedIdx = nil
     local files = {}
@@ -584,8 +700,22 @@ local function fileManagerScreen()
                     if selectedIdx == i then
                         -- Second click: open by default
                         if btn.isDir then
-                            currentPath = fs.combine(currentPath, btn.file)
-                            selectedIdx = nil
+                            local nextPath = fs.combine(currentPath, btn.file)
+                            -- Ограничение для обычных пользователей: нельзя выйти за пределы своей папки
+                            if not user.admin then
+                                local normNext = "/"..fs.combine(currentPath, btn.file)
+                                local normRoot = "/"..userRoot
+                                if normNext:sub(1, #normRoot) ~= normRoot then
+                                    centerText(h-3, "Access denied!", PALETTE.error)
+                                    sleep(1)
+                                else
+                                    currentPath = nextPath
+                                    selectedIdx = nil
+                                end
+                            else
+                                currentPath = nextPath
+                                selectedIdx = nil
+                            end
                         else
                             local filePath = fs.combine(currentPath, btn.file)
                             if isTextFile(btn.file) then
@@ -596,7 +726,6 @@ local function fileManagerScreen()
                                 centerText(2, "Press any key to return...", PALETTE.select)
                                 os.pullEvent("key")
                             else
-                                -- Unknown extension: open as text
                                 textEditorScreen(filePath)
                             end
                         end
@@ -632,9 +761,23 @@ local function fileManagerScreen()
             end
             -- "Up" button
             if not handled and isInClickable(mx, my, upX, btnY, upLabel) then
-                if currentPath ~= "/" then
-                    currentPath = fs.getDir(currentPath)
-                    selectedIdx = nil
+                if currentPath ~= (user.admin and "/" or userRoot) then
+                    local parent = fs.getDir(currentPath)
+                    -- Ограничение для обычных пользователей: нельзя выйти за пределы своей папки
+                    if not user.admin then
+                        local normParent = "/"..parent
+                        local normRoot = "/"..userRoot
+                        if normParent:sub(1, #normRoot) ~= normRoot then
+                            centerText(h-3, "Access denied!", PALETTE.error)
+                            sleep(1)
+                        else
+                            currentPath = parent
+                            selectedIdx = nil
+                        end
+                    else
+                        currentPath = parent
+                        selectedIdx = nil
+                    end
                 end
                 handled = true
             end
@@ -653,7 +796,7 @@ local function desktopScreen(user)
         clearScreen()
         local w, h = term.getSize()
         centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
-        centerText(4, "User: " .. user.name, PALETTE.border)
+        centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
         local menu = {
             {label="File Manager", y=7},
             {label="Users", y=9},
@@ -678,16 +821,16 @@ local function desktopScreen(user)
                 local clickedLabel = getMenuClick(menu, mx, my, w)
                 if clickedLabel then
                     if clickedLabel == "File Manager" then
-                        fileManagerScreen()
+                        fileManagerScreen(user)
                         clearScreen()
                         centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
-                        centerText(4, "User: " .. user.name, PALETTE.border)
+                        centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
                         drawMenu(menu, w)
                     elseif clickedLabel == "Users" then
                         userManagerScreen(user.name)
                         clearScreen()
                         centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
-                        centerText(4, "User: " .. user.name, PALETTE.border)
+                        centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
                         drawMenu(menu, w)
                     elseif clickedLabel == "Logout" then
                         return
@@ -706,69 +849,66 @@ local function authScreen()
         centerText(2, OS_NAME, PALETTE.accent)
         centerText(4, "Welcome!", PALETTE.fg)
         local users = UserManager.load()
-        local menu
+        table.sort(users, function(a, b) return a.name < b.name end)
+        local menu = {}
+        local yStart = 7
         if #users == 0 then
-            -- Первый запуск: разрешить регистрацию
             menu = {
-                {label="Register", y=7},
-                {label="Exit", y=11}
+                {label="Register", y=yStart},
+                {label="Exit", y=yStart+4}
             }
         else
-            -- После первого пользователя: только логин
-            menu = {
-                {label="Login", y=7},
-                {label="Exit", y=11}
-            }
+            -- Список пользователей
+            for i, user in ipairs(users) do
+                local label = user.name
+                if user.admin then label = label .. " [admin]" end
+                if user.pass == "" then label = label .. " (no pass)" end
+                table.insert(menu, {label=label, y=yStart+i-1, username=user.name})
+            end
+            table.insert(menu, {label="Register", y=yStart+#users+2})
+            table.insert(menu, {label="Exit", y=yStart+#users+4})
         end
         drawMenu(menu, w)
         while true do
             local event, b, mx, my = os.pullEvent()
             if event == "mouse_click" and b == 1 then
-                local clickedLabel = getMenuClick(menu, mx, my, w)
-                if clickedLabel then
-                    if clickedLabel == "Login" then
-                        local user = loginScreen()
-                        if user then return user end
-                    elseif clickedLabel == "Register" then
-                        registerScreen()
-                        -- После регистрации обновляем список пользователей и предлагаем войти
-                        local user
-                        repeat
-                            user = loginScreen()
-                        until user
-                        return user
-                    elseif clickedLabel == "Exit" then
-                        clearScreen()
-                        error("Exiting SandTecOS")
+                for _, item in ipairs(menu) do
+                    local x = math.floor((w-#item.label)/2)+1
+                    if isInClickable(mx, my, x, item.y, item.label) then
+                        if item.label == "Register" then
+                            registerScreen()
+                            break
+                        elseif item.label == "Exit" then
+                            clearScreen()
+                            error("Exiting SandTecOS")
+                        elseif item.username then
+                            -- Выбран пользователь
+                            local users = UserManager.load()
+                            local user = UserManager.get(users, item.username)
+                            if user.pass == "" then
+                                centerText(item.y+2, "Login successful!", PALETTE.accent)
+                                sleep(1)
+                                return user
+                            else
+                                centerText(item.y+2, "Enter password:", PALETTE.select)
+                                term.setCursorPos(math.floor(w/2)-8, item.y+3)
+                                term.write("Password: ")
+                                local password = inputBox(math.floor(w/2)+2, item.y+3, 16, true)
+                                if user.pass == UserManager.hashPassword(password) then
+                                    centerText(item.y+5, "Login successful!", PALETTE.accent)
+                                    sleep(1)
+                                    return user
+                                else
+                                    centerText(item.y+5, "Invalid password!", PALETTE.error)
+                                    sleep(1.5)
+                                    break
+                                end
+                            end
+                        end
                     end
-                    break
                 end
             end
         end
-    end
-end
-
-function loginScreen()
-    clearScreen()
-    local w, h = term.getSize()
-    centerText(2, OS_NAME .. " - Login", PALETTE.accent)
-    centerText(4, "Enter your credentials", PALETTE.fg)
-    term.setCursorPos(math.floor(w/2)-10, 6)
-    term.write("Username: ")
-    local username = inputBox(math.floor(w/2), 6, 16, false)
-    term.setCursorPos(math.floor(w/2)-10, 8)
-    term.write("Password: ")
-    local password = inputBox(math.floor(w/2), 8, 16, true)
-    local users = UserManager.load()
-    local user = UserManager.get(users, username)
-    if user and user.pass == UserManager.hashPassword(password) then
-        centerText(10, "Login successful!", PALETTE.accent)
-        sleep(1)
-        return user
-    else
-        centerText(10, "Invalid credentials!", PALETTE.error)
-        sleep(1.5)
-        return nil
     end
 end
 
@@ -784,15 +924,29 @@ function registerScreen()
     term.write("Password: ")
     local password = inputBox(math.floor(w/2), 8, 16, true)
     local users = UserManager.load()
+    if username == "" then
+        centerText(10, "Username cannot be empty!", PALETTE.error)
+        sleep(1.5)
+        return false
+    end
+    if username:find("[^%w_]") then
+        centerText(10, "ASCII letters, digits, _ only!", PALETTE.error)
+        sleep(1.5)
+        return false
+    end
     if UserManager.exists(users, username) then
         centerText(10, "User already exists!", PALETTE.error)
         sleep(1.5)
-        return
+        return false
     end
-    table.insert(users, {name=username, pass=UserManager.hashPassword(password)})
+    -- Первый пользователь всегда admin
+    local isFirst = #users == 0
+    table.insert(users, {name=username, pass=UserManager.hashPassword(password), admin=isFirst})
     UserManager.save(users)
+    UserManager.createUserDir(username)
     centerText(10, "User registered!", PALETTE.accent)
     sleep(1.5)
+    return true
 end
 
 -- === MAIN LOOP ===
