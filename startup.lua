@@ -453,65 +453,195 @@ local function userManagerScreen(currentUser)
 end
 
 -- === FILE MANAGER ===
+
+local function isTextFile(filename)
+    -- Extend this list as needed
+    return filename:match("%.txt$") or filename:match("%.lua$") or filename:match("%.cfg$") or filename:match("%.log$") or filename:match("%.json$") or not filename:find("%.[^%.]+$")
+end
+
+local function isExecutableFile(filename)
+    -- Consider .lua and .exe as executable, extend as needed
+    return filename:match("%.lua$") or filename:match("%.exe$")
+end
+
+local function openWithMenu(filePath, isText)
+    local w, h = term.getSize()
+    local menu = {
+        {label="Open normally", y=math.floor(h/2)-1},
+        {label="Open in text editor", y=math.floor(h/2)+1}
+    }
+    clearScreen()
+    centerText(math.floor(h/2)-3, "Open file: " .. fs.getName(filePath), PALETTE.accent)
+    drawMenu(menu, w)
+    while true do
+        local event, b, mx, my = os.pullEvent()
+        if event == "mouse_click" and b == 1 then
+            local clickedLabel = getMenuClick(menu, mx, my, w)
+            if clickedLabel then
+                if clickedLabel == "Open normally" then
+                    if isText then
+                        textEditorScreen(filePath)
+                    else
+                        clearScreen()
+                        shell.run(filePath)
+                        centerText(2, "Press any key to return...", PALETTE.select)
+                        os.pullEvent("key")
+                    end
+                    break
+                elseif clickedLabel == "Open in text editor" then
+                    textEditorScreen(filePath)
+                    break
+                end
+            end
+        elseif event == "key" then
+            if b == keys.escape then break end
+        end
+    end
+end
+
+local function createFileDialog(currentPath)
+    local w, h = term.getSize()
+    clearScreen()
+    centerText(math.floor(h/2)-2, "Create file:", PALETTE.accent)
+    term.setCursorPos(math.floor(w/2)-10, math.floor(h/2))
+    term.write("Filename: ")
+    local filename = inputBox(math.floor(w/2), math.floor(h/2), 20, false)
+    if filename and filename ~= "" then
+        local fullPath = fs.combine(currentPath, filename)
+        if fs.exists(fullPath) then
+            centerText(math.floor(h/2)+2, "File already exists!", PALETTE.error)
+            sleep(1.5)
+            return
+        end
+        -- Create empty file
+        local f = fs.open(fullPath, "w")
+        if f then f.close() end
+        centerText(math.floor(h/2)+2, "File created: " .. filename, PALETTE.accent)
+        sleep(1)
+    end
+end
+
 local function fileManagerScreen()
     local w, h = term.getSize()
     local currentPath = "/"
     local shouldExit = false
-    while not shouldExit do
-        clearScreen()
-        centerText(1, OS_NAME .. " - File Manager", PALETTE.accent)
-        term.setCursorPos(2,3)
-        term.setTextColor(PALETTE.border)
-        term.write("Current path: " .. currentPath)
-        term.setTextColor(PALETTE.fg)
-        local files = fs.list(currentPath)
+    local selectedIdx = nil
+    local files = {}
+    local btns = {}
+
+    local function refreshFiles()
+        files = fs.list(currentPath)
         table.sort(files)
-        local btns = {}
+        btns = {}
         local yStart = 5
         for i, file in ipairs(files) do
             local isDir = fs.isDir(fs.combine(currentPath, file))
             local label = isDir and ("[D] "..file) or file
             local x = 4
             local y = yStart + i - 1
-            drawClickableText(x, y, label, false)
-            table.insert(btns, {x=x, y=y, label=label, file=file, isDir=isDir})
+            btns[i] = {x=x, y=y, label=label, file=file, isDir=isDir, idx=i}
         end
+    end
+
+    local function drawFileManager()
+        clearScreen()
+        centerText(1, OS_NAME .. " - File Manager", PALETTE.accent)
+        term.setCursorPos(2,3)
+        term.setTextColor(PALETTE.border)
+        term.write("Current path: " .. currentPath)
+        term.setTextColor(PALETTE.fg)
+        -- Draw files
+        for i, btn in ipairs(btns) do
+            drawClickableText(btn.x, btn.y, btn.label, selectedIdx == i)
+        end
+        -- Draw bottom buttons
+        local plusLabel = "+"
+        local openWithLabel = "Open With..."
         local upLabel = "Up"
         local exitLabel = "Exit"
-        local upX = 2
-        local upY = h-2
-        local exitX = 8
-        local exitY = h-2
-        drawClickableText(upX, upY, upLabel, false)
-        drawClickableText(exitX, exitY, exitLabel, false)
+        -- Left bottom: Exit, Up
+        local exitX = 2
+        local upX = exitX + #exitLabel + 4
+        local btnY = h-2
+        drawClickableText(exitX, btnY, exitLabel, false)
+        drawClickableText(upX, btnY, upLabel, false)
+        -- Right bottom: Open With..., +
+        local plusX = w - (#plusLabel + 2)
+        local openWithX = plusX - (#openWithLabel + 2)
+        drawClickableText(openWithX, btnY, openWithLabel, selectedIdx ~= nil)
+        drawClickableText(plusX, btnY, plusLabel, false)
+    end
+
+    while not shouldExit do
+        refreshFiles()
+        drawFileManager()
         local event, b, mx, my = os.pullEvent()
         if event == "mouse_click" and b == 1 then
             local handled = false
+            -- Check file buttons
             for i, btn in ipairs(btns) do
                 if isInClickable(mx, my, btn.x, btn.y, btn.label) then
-                    local fpath = fs.combine(currentPath, btn.file)
-                    if btn.isDir then
-                        currentPath = fpath
-                    else
-                        if btn.file:match("%.txt$") then
-                            textEditorScreen(fpath)
+                    if selectedIdx == i then
+                        -- Second click: open by default
+                        if btn.isDir then
+                            currentPath = fs.combine(currentPath, btn.file)
+                            selectedIdx = nil
                         else
-                            clearScreen()
-                            shell.run(fpath)
-                            centerText(2, "Press any key to return...", PALETTE.select)
-                            os.pullEvent("key")
+                            local filePath = fs.combine(currentPath, btn.file)
+                            if isTextFile(btn.file) then
+                                textEditorScreen(filePath)
+                            elseif isExecutableFile(btn.file) then
+                                clearScreen()
+                                shell.run(filePath)
+                                centerText(2, "Press any key to return...", PALETTE.select)
+                                os.pullEvent("key")
+                            else
+                                -- Unknown extension: open as text
+                                textEditorScreen(filePath)
+                            end
                         end
+                    else
+                        selectedIdx = i
                     end
                     handled = true
                     break
                 end
             end
-            if not handled and isInClickable(mx, my, upX, upY, upLabel) then
+            -- Bottom buttons
+            local plusLabel = "+"
+            local openWithLabel = "Open With..."
+            local upLabel = "Up"
+            local exitLabel = "Exit"
+            local exitX = 2
+            local upX = exitX + #exitLabel + 4
+            local btnY = h-2
+            local plusX = w - (#plusLabel + 2)
+            local openWithX = plusX - (#openWithLabel + 2)
+            -- "+" button
+            if not handled and isInClickable(mx, my, plusX, btnY, plusLabel) then
+                createFileDialog(currentPath)
+                handled = true
+            end
+            -- "Open With..." button
+            if not handled and isInClickable(mx, my, openWithX, btnY, openWithLabel) and selectedIdx then
+                local btn = btns[selectedIdx]
+                if btn and not btn.isDir then
+                    openWithMenu(fs.combine(currentPath, btn.file), isTextFile(btn.file))
+                end
+                handled = true
+            end
+            -- "Up" button
+            if not handled and isInClickable(mx, my, upX, btnY, upLabel) then
                 if currentPath ~= "/" then
                     currentPath = fs.getDir(currentPath)
+                    selectedIdx = nil
                 end
-            elseif not handled and isInClickable(mx, my, exitX, exitY, exitLabel) then
+                handled = true
+            end
+            -- "Exit" button
+            if not handled and isInClickable(mx, my, exitX, btnY, exitLabel) then
                 shouldExit = true
+                handled = true
             end
         end
     end
