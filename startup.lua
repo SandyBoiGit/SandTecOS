@@ -421,48 +421,49 @@ local function userManagerScreen(currentUser)
             table.insert(btns, {x=x, y=y, label=label, name=user.name})
         end
 
-        -- Кнопки управления
+        -- Кнопки управления (вертикально справа, сокращённые подписи)
         local adminButtons = {
-            {label="Add User",    action="add"},
-            {label="Delete User", action="del"},
-            {label="Set Password",action="pass"},
-            {label="Toggle Admin",action="admin"},
-            {label="Exit",        action="exit"}
+            {label="Add",    action="add"},
+            {label="Del",    action="del"},
+            {label="Set Pass",action="pass"},
+            {label="+Admin", action="admin"},
         }
         local userButtons = {
-            {label="Set Password",action="pass"},
-            {label="Exit",        action="exit"}
+            {label="Set Pass",action="pass"},
         }
 
         local buttons = isAdmin and adminButtons or userButtons
-        local btnY = h-5
-        local btnCount = #buttons
-        local totalBtnWidth = 0
-        local btnSpaces = 2 -- spaces between buttons
-
-        -- Calculate total width of all buttons + spaces
-        for i, btn in ipairs(buttons) do
-            totalBtnWidth = totalBtnWidth + #btn.label
+        local maxBtnLen = 0
+        for _, btn in ipairs(buttons) do
+            if #btn.label > maxBtnLen then maxBtnLen = #btn.label end
         end
-        totalBtnWidth = totalBtnWidth + btnSpaces * (btnCount - 1)
-
-        -- Start X so that all buttons are centered
-        local startX = math.floor((w - totalBtnWidth) / 2) + 1
-
-        -- Draw buttons
-        local btnX = startX
+        local btnX = w - maxBtnLen - 4 -- правая колонка, с учётом самой длинной кнопки
+        local btnYStart = yStart
         for i, btn in ipairs(buttons) do
-            drawClickableText(btnX, btnY, btn.label, false)
             btn.x = btnX
-            btn.y = btnY
-            btnX = btnX + #btn.label + btnSpaces
+            btn.y = btnYStart + (i-1)*2
+            drawClickableText(btn.x, btn.y, btn.label, false)
+        end
+
+        -- Нижние кнопки: Exit и Add (только для админа)
+        local bottomBtns = {}
+        local bottomY = h-2
+        local exitLabel = "Exit"
+        local addLabel = "Add"
+        local exitX = 4
+        drawClickableText(exitX, bottomY, exitLabel, false)
+        table.insert(bottomBtns, {x=exitX, y=bottomY, label=exitLabel, action="exit"})
+        if isAdmin then
+            local addX = exitX + #exitLabel + 6
+            drawClickableText(addX, bottomY, addLabel, false)
+            table.insert(bottomBtns, {x=addX, y=bottomY, label=addLabel, action="add"})
         end
 
         -- Инструкция
         if isAdmin then
-            centerText(h-1, "Admins: Add/Del/SetPass/ToggleAdmin. Users: Only change own password.", PALETTE.border)
+            centerText(h-1, "Admins: Select user, then action. Add доступен снизу.", PALETTE.border)
         else
-            centerText(h-1, "Select yourself and Set Password. Other actions unavailable.", PALETTE.border)
+            centerText(h-1, "Select yourself and Set Pass. Other actions unavailable.", PALETTE.border)
         end
 
         local event, b, mx, my = os.pullEvent()
@@ -474,7 +475,7 @@ local function userManagerScreen(currentUser)
                 end
             end
             users = UserManager.load()
-            -- Обработка кнопок
+            -- Обработка вертикальных кнопок справа
             for i, btn in ipairs(buttons) do
                 if isInClickable(mx, my, btn.x, btn.y, btn.label) then
                     if btn.action == "add" then
@@ -559,8 +560,39 @@ local function userManagerScreen(currentUser)
                                 end
                             end
                         end
-                    elseif btn.action == "exit" then
+                    end
+                end
+            end
+            -- Обработка нижних кнопок
+            for _, btn in ipairs(bottomBtns) do
+                if isInClickable(mx, my, btn.x, btn.y, btn.label) then
+                    if btn.action == "exit" then
                         shouldExit = true
+                    elseif btn.action == "add" then
+                        -- Дублируем add user для удобства
+                        centerText(h-3, "Enter new username:", PALETTE.select)
+                        term.setCursorPos(2, h-2)
+                        local uname = inputBox(2, h-2, 16, false)
+                        if uname == "" then
+                            centerText(h-3, "Username cannot be empty!", PALETTE.error)
+                            sleep(1)
+                        elseif uname:find("[^%w_]") then
+                            centerText(h-3, "ASCII letters, digits, _ only!", PALETTE.error)
+                            sleep(1)
+                        elseif UserManager.exists(users, uname) then
+                            centerText(h-3, "User already exists!", PALETTE.error)
+                            sleep(1)
+                        else
+                            centerText(h-3, "Enter password (empty = no pass):", PALETTE.select)
+                            term.setCursorPos(2, h-2)
+                            local upass = inputBox(2, h-2, 16, true)
+                            local isFirst = #users == 0
+                            table.insert(users, {name=uname, pass=UserManager.hashPassword(upass), admin=isFirst})
+                            UserManager.save(users)
+                            UserManager.createUserDir(uname)
+                            centerText(h-3, "User added!", PALETTE.accent)
+                            sleep(1)
+                        end
                     end
                 end
             end
