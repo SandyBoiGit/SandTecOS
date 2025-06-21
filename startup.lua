@@ -421,7 +421,7 @@ local function userManagerScreen(currentUser)
             table.insert(btns, {x=x, y=y, label=label, name=user.name})
         end
 
-        -- Кнопки управления (вертикально справа, сокращённые подписи)
+        -- Кнопки управления 
         local adminButtons = {
             {label="Add",    action="add"},
             {label="Del",    action="del"},
@@ -437,7 +437,7 @@ local function userManagerScreen(currentUser)
         for _, btn in ipairs(buttons) do
             if #btn.label > maxBtnLen then maxBtnLen = #btn.label end
         end
-        local btnX = w - maxBtnLen - 4 -- правая колонка, с учётом самой длинной кнопки
+        local btnX = w - maxBtnLen - 4 
         local btnYStart = yStart
         for i, btn in ipairs(buttons) do
             btn.x = btnX
@@ -445,7 +445,7 @@ local function userManagerScreen(currentUser)
             drawClickableText(btn.x, btn.y, btn.label, false)
         end
 
-        -- Нижние кнопки: Exit и Add (только для админа)
+        -- Нижние кнопки: Exit и Add 
         local bottomBtns = {}
         local bottomY = h-2
         local exitLabel = "Exit"
@@ -461,7 +461,7 @@ local function userManagerScreen(currentUser)
 
         -- Инструкция
         if isAdmin then
-            centerText(h-1, "Admins: Select user, then action. Add доступен снизу.", PALETTE.border)
+            centerText(h-1, "Admins: Select user, then action.", PALETTE.border)
         else
             centerText(h-1, "Select yourself and Set Pass. Other actions unavailable.", PALETTE.border)
         end
@@ -792,22 +792,30 @@ local function fileManagerScreen(user)
             end
             -- "Up" button
             if not handled and isInClickable(mx, my, upX, btnY, upLabel) then
-                if currentPath ~= (user.admin and "/" or userRoot) then
+                local rootPath = user.admin and "/" or userRoot
+                -- Проверяем, не находимся ли уже в корне
+                if currentPath ~= rootPath then
                     local parent = fs.getDir(currentPath)
-                    -- Ограничение для обычных пользователей: нельзя выйти за пределы своей папки
-                    if not user.admin then
-                        local normParent = "/"..parent
-                        local normRoot = "/"..userRoot
-                        if normParent:sub(1, #normRoot) ~= normRoot then
-                            centerText(h-3, "Access denied!", PALETTE.error)
-                            sleep(1)
+                    -- Если parent пустой строки, значит мы в "/" и не двигаемся выше
+                    if parent == "" then
+                        currentPath = rootPath
+                        selectedIdx = nil
+                    else
+                        -- Ограничение для обычных пользователей: нельзя выйти за пределы своей папки
+                        if not user.admin then
+                            local normParent = "/"..parent
+                            local normRoot = "/"..userRoot
+                            if normParent:sub(1, #normRoot) ~= normRoot then
+                                centerText(h-3, "Access denied!", PALETTE.error)
+                                sleep(1)
+                            else
+                                currentPath = parent
+                                selectedIdx = nil
+                            end
                         else
                             currentPath = parent
                             selectedIdx = nil
                         end
-                    else
-                        currentPath = parent
-                        selectedIdx = nil
                     end
                 end
                 handled = true
