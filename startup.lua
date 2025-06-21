@@ -421,28 +421,47 @@ local function userManagerScreen(currentUser)
             table.insert(btns, {x=x, y=y, label=label, name=user.name})
         end
 
-        -- Admins see all controls, users see only password change for self
-        local addLabel = "Add User"
-        local delLabel = "Delete User"
-        local passLabel = "Set Password"
-        local adminLabel = "Toggle Admin"
-        local exitLabel = "Exit"
-        local addX, addY = 2, h-5
-        local delX, delY = 14, h-5
-        local passX, passY = 30, h-5
-        local adminX, adminY = 48, h-5
-        local exitX, exitY = 2, h-2
+        -- Кнопки управления
+        local adminButtons = {
+            {label="Add User",    action="add"},
+            {label="Delete User", action="del"},
+            {label="Set Password",action="pass"},
+            {label="Toggle Admin",action="admin"},
+            {label="Exit",        action="exit"}
+        }
+        local userButtons = {
+            {label="Set Password",action="pass"},
+            {label="Exit",        action="exit"}
+        }
 
+        local buttons = isAdmin and adminButtons or userButtons
+        local btnY = h-5
+        local btnCount = #buttons
+        local totalBtnWidth = 0
+        local btnSpaces = 2 -- spaces between buttons
+
+        -- Calculate total width of all buttons + spaces
+        for i, btn in ipairs(buttons) do
+            totalBtnWidth = totalBtnWidth + #btn.label
+        end
+        totalBtnWidth = totalBtnWidth + btnSpaces * (btnCount - 1)
+
+        -- Start X so that all buttons are centered
+        local startX = math.floor((w - totalBtnWidth) / 2) + 1
+
+        -- Draw buttons
+        local btnX = startX
+        for i, btn in ipairs(buttons) do
+            drawClickableText(btnX, btnY, btn.label, false)
+            btn.x = btnX
+            btn.y = btnY
+            btnX = btnX + #btn.label + btnSpaces
+        end
+
+        -- Инструкция
         if isAdmin then
-            drawClickableText(addX, addY, addLabel, false)
-            drawClickableText(delX, delY, delLabel, false)
-            drawClickableText(passX, passY, passLabel, false)
-            drawClickableText(adminX, adminY, adminLabel, false)
-            drawClickableText(exitX, exitY, exitLabel, false)
             centerText(h-1, "Admins: Add/Del/SetPass/ToggleAdmin. Users: Only change own password.", PALETTE.border)
         else
-            drawClickableText(passX, passY, passLabel, false)
-            drawClickableText(exitX, exitY, exitLabel, false)
             centerText(h-1, "Select yourself and Set Password. Other actions unavailable.", PALETTE.border)
         end
 
@@ -455,114 +474,94 @@ local function userManagerScreen(currentUser)
                 end
             end
             users = UserManager.load()
-            -- Admin controls
-            if isAdmin then
-                -- Add User
-                if isInClickable(mx, my, addX, addY, addLabel) then
-                    centerText(h-3, "Enter new username:", PALETTE.select)
-                    term.setCursorPos(2, h-2)
-                    local uname = inputBox(2, h-2, 16, false)
-                    if uname == "" then
-                        centerText(h-3, "Username cannot be empty!", PALETTE.error)
-                        sleep(1)
-                    elseif uname:find("[^%w_]") then
-                        centerText(h-3, "ASCII letters, digits, _ only!", PALETTE.error)
-                        sleep(1)
-                    elseif UserManager.exists(users, uname) then
-                        centerText(h-3, "User already exists!", PALETTE.error)
-                        sleep(1)
-                    else
-                        centerText(h-3, "Enter password (empty = no pass):", PALETTE.select)
+            -- Обработка кнопок
+            for i, btn in ipairs(buttons) do
+                if isInClickable(mx, my, btn.x, btn.y, btn.label) then
+                    if btn.action == "add" then
+                        centerText(h-3, "Enter new username:", PALETTE.select)
                         term.setCursorPos(2, h-2)
-                        local upass = inputBox(2, h-2, 16, true)
-                        -- Первый пользователь всегда admin
-                        local isFirst = #users == 0
-                        table.insert(users, {name=uname, pass=UserManager.hashPassword(upass), admin=isFirst})
-                        UserManager.save(users)
-                        UserManager.createUserDir(uname)
-                        centerText(h-3, "User added!", PALETTE.accent)
-                        sleep(1)
-                    end
-                -- Delete User
-                elseif isInClickable(mx, my, delX, delY, delLabel) then
-                    if not selectedUser then
-                        centerText(h-3, "Select user to delete!", PALETTE.error)
-                        sleep(1)
-                    elseif selectedUser == currentUser then
-                        centerText(h-3, "Cannot delete yourself!", PALETTE.error)
-                        sleep(1)
-                    else
-                        -- Prevent deleting last admin
-                        local userToDel = UserManager.get(users, selectedUser)
-                        if userToDel and userToDel.admin and UserManager.countAdmins(users) == 1 then
-                            centerText(h-3, "Cannot delete last admin!", PALETTE.error)
+                        local uname = inputBox(2, h-2, 16, false)
+                        if uname == "" then
+                            centerText(h-3, "Username cannot be empty!", PALETTE.error)
+                            sleep(1)
+                        elseif uname:find("[^%w_]") then
+                            centerText(h-3, "ASCII letters, digits, _ only!", PALETTE.error)
+                            sleep(1)
+                        elseif UserManager.exists(users, uname) then
+                            centerText(h-3, "User already exists!", PALETTE.error)
                             sleep(1)
                         else
-                            UserManager.remove(users, selectedUser)
+                            centerText(h-3, "Enter password (empty = no pass):", PALETTE.select)
+                            term.setCursorPos(2, h-2)
+                            local upass = inputBox(2, h-2, 16, true)
+                            local isFirst = #users == 0
+                            table.insert(users, {name=uname, pass=UserManager.hashPassword(upass), admin=isFirst})
                             UserManager.save(users)
-                            UserManager.deleteUserDir(selectedUser)
-                            centerText(h-3, "User deleted!", PALETTE.accent)
+                            UserManager.createUserDir(uname)
+                            centerText(h-3, "User added!", PALETTE.accent)
                             sleep(1)
-                            selectedUser = nil
                         end
-                    end
-                -- Set Password
-                elseif isInClickable(mx, my, passX, passY, passLabel) then
-                    if not selectedUser then
-                        centerText(h-3, "Select user to set password!", PALETTE.error)
-                        sleep(1)
-                    else
-                        centerText(h-3, "Enter new password (empty = no pass):", PALETTE.select)
-                        term.setCursorPos(2, h-2)
-                        local upass = inputBox(2, h-2, 16, true)
-                        UserManager.setPassword(users, selectedUser, upass)
-                        UserManager.save(users)
-                        centerText(h-3, "Password changed!", PALETTE.accent)
-                        sleep(1)
-                    end
-                -- Toggle Admin
-                elseif isInClickable(mx, my, adminX, adminY, adminLabel) then
-                    if not selectedUser then
-                        centerText(h-3, "Select user to toggle admin!", PALETTE.error)
-                        sleep(1)
-                    elseif selectedUser == currentUser then
-                        centerText(h-3, "Cannot change your own admin status!", PALETTE.error)
-                        sleep(1)
-                    else
-                        local userObj = UserManager.get(users, selectedUser)
-                        if userObj then
-                            if userObj.admin and UserManager.countAdmins(users) == 1 then
-                                centerText(h-3, "Cannot remove last admin!", PALETTE.error)
+                    elseif btn.action == "del" then
+                        if not selectedUser then
+                            centerText(h-3, "Select user to delete!", PALETTE.error)
+                            sleep(1)
+                        elseif selectedUser == currentUser then
+                            centerText(h-3, "Cannot delete yourself!", PALETTE.error)
+                            sleep(1)
+                        else
+                            local userToDel = UserManager.get(users, selectedUser)
+                            if userToDel and userToDel.admin and UserManager.countAdmins(users) == 1 then
+                                centerText(h-3, "Cannot delete last admin!", PALETTE.error)
                                 sleep(1)
                             else
-                                UserManager.setAdmin(users, selectedUser, not userObj.admin)
+                                UserManager.remove(users, selectedUser)
                                 UserManager.save(users)
-                                centerText(h-3, "Admin status toggled!", PALETTE.accent)
+                                UserManager.deleteUserDir(selectedUser)
+                                centerText(h-3, "User deleted!", PALETTE.accent)
                                 sleep(1)
+                                selectedUser = nil
                             end
                         end
+                    elseif btn.action == "pass" then
+                        if not selectedUser then
+                            centerText(h-3, "Select user to set password!", PALETTE.error)
+                            sleep(1)
+                        elseif not isAdmin and selectedUser ~= currentUser then
+                            centerText(h-3, "Can only change your own password!", PALETTE.error)
+                            sleep(1)
+                        else
+                            centerText(h-3, "Enter new password (empty = no pass):", PALETTE.select)
+                            term.setCursorPos(2, h-2)
+                            local upass = inputBox(2, h-2, 16, true)
+                            UserManager.setPassword(users, selectedUser, upass)
+                            UserManager.save(users)
+                            centerText(h-3, "Password changed!", PALETTE.accent)
+                            sleep(1)
+                        end
+                    elseif btn.action == "admin" then
+                        if not selectedUser then
+                            centerText(h-3, "Select user to toggle admin!", PALETTE.error)
+                            sleep(1)
+                        elseif selectedUser == currentUser then
+                            centerText(h-3, "Cannot change your own admin status!", PALETTE.error)
+                            sleep(1)
+                        else
+                            local userObj = UserManager.get(users, selectedUser)
+                            if userObj then
+                                if userObj.admin and UserManager.countAdmins(users) == 1 then
+                                    centerText(h-3, "Cannot remove last admin!", PALETTE.error)
+                                    sleep(1)
+                                else
+                                    UserManager.setAdmin(users, selectedUser, not userObj.admin)
+                                    UserManager.save(users)
+                                    centerText(h-3, "Admin status toggled!", PALETTE.accent)
+                                    sleep(1)
+                                end
+                            end
+                        end
+                    elseif btn.action == "exit" then
+                        shouldExit = true
                     end
-                -- Exit
-                elseif isInClickable(mx, my, exitX, exitY, exitLabel) then
-                    shouldExit = true
-                end
-            else
-                -- User controls: only set own password
-                if isInClickable(mx, my, passX, passY, passLabel) then
-                    if selectedUser ~= currentUser then
-                        centerText(h-3, "Can only change your own password!", PALETTE.error)
-                        sleep(1)
-                    else
-                        centerText(h-3, "Enter new password (empty = no pass):", PALETTE.select)
-                        term.setCursorPos(2, h-2)
-                        local upass = inputBox(2, h-2, 16, true)
-                        UserManager.setPassword(users, currentUser, upass)
-                        UserManager.save(users)
-                        centerText(h-3, "Password changed!", PALETTE.accent)
-                        sleep(1)
-                    end
-                elseif isInClickable(mx, my, exitX, exitY, exitLabel) then
-                    shouldExit = true
                 end
             end
         end
@@ -854,8 +853,8 @@ local function authScreen()
         local yStart = 7
         if #users == 0 then
             menu = {
-                {label="Register", y=yStart},
-                {label="Exit", y=yStart+4}
+                {label="Register", y=yStart}
+                -- Exit button removed
             }
         else
             -- Список пользователей
@@ -866,7 +865,7 @@ local function authScreen()
                 table.insert(menu, {label=label, y=yStart+i-1, username=user.name})
             end
             table.insert(menu, {label="Register", y=yStart+#users+2})
-            table.insert(menu, {label="Exit", y=yStart+#users+4})
+            -- Exit button removed
         end
         drawMenu(menu, w)
         while true do
@@ -878,9 +877,6 @@ local function authScreen()
                         if item.label == "Register" then
                             registerScreen()
                             break
-                        elseif item.label == "Exit" then
-                            clearScreen()
-                            error("Exiting SandTecOS")
                         elseif item.username then
                             -- Выбран пользователь
                             local users = UserManager.load()
