@@ -601,20 +601,29 @@ local function userManagerScreen(currentUser)
 end
 
 -- === FILE MANAGER ===
+
 local function isTextFile(filename)
-    return filename:match("%.txt$") or filename:match("%.lua$") or filename:match("%.cfg$") or filename:match("%.log$") or filename:match("%.json$") or not filename:find("%.[^%.]+$")
+    -- Только текстовые файлы, не .lua/.exe
+    return filename:match("%.txt$") or filename:match("%.cfg$") or filename:match("%.log$") or filename:match("%.json$") or not filename:find("%.[^%.]+$")
 end
 
 local function isExecutableFile(filename)
     return filename:match("%.lua$") or filename:match("%.exe$")
 end
 
-local function openWithMenu(filePath, isText)
+local function openWithMenu(filePath, isText, isExec)
     local w, h = term.getSize()
-    local menu = {
-        {label="Open normally", y=math.floor(h/2)-1},
-        {label="Open in text editor", y=math.floor(h/2)+1}
-    }
+    local menu = {}
+    if isExec then
+        menu = {
+            {label="Run", y=math.floor(h/2)-1},
+            {label="Open in text editor", y=math.floor(h/2)+1}
+        }
+    else
+        menu = {
+            {label="Open in text editor", y=math.floor(h/2)-1}
+        }
+    end
     clearScreen()
     centerText(math.floor(h/2)-3, "Open file: " .. fs.getName(filePath), PALETTE.accent)
     drawMenu(menu, w)
@@ -623,15 +632,11 @@ local function openWithMenu(filePath, isText)
         if event == "mouse_click" and b == 1 then
             local clickedLabel = getMenuClick(menu, mx, my, w)
             if clickedLabel then
-                if clickedLabel == "Open normally" then
-                    if isText then
-                        textEditorScreen(filePath)
-                    else
-                        clearScreen()
-                        shell.run(filePath)
-                        centerText(2, "Press any key to return...", PALETTE.select)
-                        os.pullEvent("key")
-                    end
+                if clickedLabel == "Run" then
+                    clearScreen()
+                    shell.run(filePath)
+                    centerText(2, "Press any key to return...", PALETTE.select)
+                    os.pullEvent("key")
                     break
                 elseif clickedLabel == "Open in text editor" then
                     textEditorScreen(filePath)
@@ -749,13 +754,13 @@ local function fileManagerScreen(user)
                             end
                         else
                             local filePath = fs.combine(currentPath, btn.file)
-                            if isTextFile(btn.file) then
-                                textEditorScreen(filePath)
-                            elseif isExecutableFile(btn.file) then
+                            if isExecutableFile(btn.file) then
                                 clearScreen()
                                 shell.run(filePath)
                                 centerText(2, "Press any key to return...", PALETTE.select)
                                 os.pullEvent("key")
+                            elseif isTextFile(btn.file) then
+                                textEditorScreen(filePath)
                             else
                                 textEditorScreen(filePath)
                             end
@@ -786,7 +791,11 @@ local function fileManagerScreen(user)
             if not handled and isInClickable(mx, my, openWithX, btnY, openWithLabel) and selectedIdx then
                 local btn = btns[selectedIdx]
                 if btn and not btn.isDir then
-                    openWithMenu(fs.combine(currentPath, btn.file), isTextFile(btn.file))
+                    openWithMenu(
+                        fs.combine(currentPath, btn.file),
+                        isTextFile(btn.file),
+                        isExecutableFile(btn.file)
+                    )
                 end
                 handled = true
             end
