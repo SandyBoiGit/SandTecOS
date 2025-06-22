@@ -220,6 +220,18 @@ local function textEditorScreen(filepath)
     local scroll = 0
     local editing = true
 
+    -- Кнопки управления
+    local saveLabel = "Save"
+    local exitLabel = "Exit"
+    local btnY = h-1
+    local saveX = 4
+    local exitX = saveX + #saveLabel + 6
+
+    local function drawEditorButtons()
+        drawClickableText(saveX, btnY, saveLabel, false)
+        drawClickableText(exitX, btnY, exitLabel, false)
+    end
+
     local function redraw()
         term.setBackgroundColor(colors.black)
         term.setTextColor(colors.lime)
@@ -265,10 +277,12 @@ local function textEditorScreen(filepath)
             end
         end
         -- Status bar
-        term.setCursorPos(1, h-1)
+        term.setCursorPos(1, h-2)
         term.setTextColor(statusColor)
         term.write(statusMsg .. string.rep(" ", w - #statusMsg))
         term.setTextColor(colors.lime)
+        -- Draw buttons
+        drawEditorButtons()
         -- Cursor (set terminal cursor position for blinking if supported)
         local cx = cursorX
         local cy = cursorY - scroll
@@ -310,12 +324,12 @@ local function textEditorScreen(filepath)
         if cursorX > #line + 1 then cursorX = #line + 1 end
     end
 
-    setStatus("F2: Save | F3: Exit | Arrows: Move | Enter: New line | Backspace: Del", colors.lime)
+    setStatus("Use mouse to Save/Exit. Arrows: Move | Enter: New line | Backspace: Del", colors.lime)
     safeSetCursorBlink(false)
     redraw()
     while editing do
         redraw()
-        local event, p1 = os.pullEvent()
+        local event, p1, p2, p3 = os.pullEvent()
         if event == "char" then
             local line = lines[cursorY] or ""
             lines[cursorY] = line:sub(1, cursorX-1) .. p1 .. line:sub(cursorX)
@@ -366,10 +380,25 @@ local function textEditorScreen(filepath)
                 cursorY = cursorY + 1
                 cursorX = 1
                 if cursorY - scroll > h-3 then scroll = scroll + 1 end
-            elseif p1 == keys.f2 then
-                saveFile()
-            elseif p1 == keys.f3 then
-                editing = false
+            end
+        elseif event == "mouse_click" and p1 == 1 then
+            -- Проверяем кнопки Save/Exit
+            local mx, my = p2, p3
+            if my == btnY then
+                if mx >= saveX and mx < saveX + #saveLabel then
+                    saveFile()
+                elseif mx >= exitX and mx < exitX + #exitLabel then
+                    editing = false
+                end
+            end
+            -- Клик по тексту: переместить курсор
+            if my >= 2 and my <= h-3+1 then
+                local lineIdx = my-1 + scroll
+                if lines[lineIdx] then
+                    cursorY = lineIdx
+                    local line = lines[cursorY]
+                    cursorX = math.min(mx, #line+1)
+                end
             end
         end
         clampCursor()
