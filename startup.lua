@@ -951,6 +951,45 @@ local function fileManagerScreen(user)
     end
 end
 
+-- === CREATE FILE DIALOG ===
+local function createFileDialog(currentPath)
+    local w, h = term.getSize()
+    clearScreen()
+    centerText(2, "Create File or Directory", PALETTE.accent)
+    centerText(4, "Enter name (end with / for folder):", PALETTE.fg)
+    term.setCursorPos(4, 6)
+    term.write("Name: ")
+    local name = inputBox(11, 6, 24, false)
+    if name == "" then
+        centerText(8, "Name cannot be empty!", PALETTE.error)
+        sleep(1.5)
+        return
+    end
+    if name:find("[/\\]") and name:sub(-1) ~= "/" then
+        centerText(8, "Invalid character in name!", PALETTE.error)
+        sleep(1.5)
+        return
+    end
+    local fullPath = fs.combine(currentPath, name)
+    if fs.exists(fullPath) then
+        centerText(8, "File or folder already exists!", PALETTE.error)
+        sleep(1.5)
+        return
+    end
+    if name:sub(-1) == "/" then
+        -- Create directory
+        pcall(fs.makeDir, fullPath)
+        centerText(8, "Directory created!", PALETTE.accent)
+        sleep(1)
+    else
+        -- Create file
+        local f = fs.open(fullPath, "w")
+        if f then f.close() end
+        centerText(8, "File created!", PALETTE.accent)
+        sleep(1)
+    end
+end
+
 -- === OS DELETE UTILS ===
 local function deleteSandTecOS()
     local function safeDelete(path)
