@@ -656,8 +656,6 @@ local function moveFileOrDir(src, dst)
     if not ok2 then return false, "Delete failed: " .. tostring(err2) end
     return true
 end
-
--- === DIRECTORY SELECTOR ===
 local function selectDirectoryDialog(startPath, user, userRoot)
     local w, h = term.getSize()
     local currentPath = startPath
@@ -764,6 +762,16 @@ local function fileManagerScreen(user)
     local files = {}
     local btns = {}
 
+    -- Проверка расширения для исполняемых файлов
+    local function isExecutableFile(filename)
+        return filename:match("%.lua$") or filename:match("%.exe$")
+    end
+
+    -- Проверка расширения для текстовых файлов
+    local function isTextFile(filename)
+        return filename:match("%.txt$") or filename:match("%.md$") or filename:match("%.cfg$") or filename:match("%.log$")
+    end
+
     local function refreshFiles()
         files = fs.list(currentPath)
         table.sort(files)
@@ -793,6 +801,7 @@ local function fileManagerScreen(user)
         local plusLabel = "+"
         local openWithLabel = "Open With..."
         local moveLabel = "Move"
+        local delLabel = "Delete"
         local upLabel = "Up"
         local exitLabel = "Exit"
         -- Left bottom: Exit, Up
@@ -801,13 +810,70 @@ local function fileManagerScreen(user)
         local btnY = h-2
         drawClickableText(exitX, btnY, exitLabel, false)
         drawClickableText(upX, btnY, upLabel, false)
-        -- Right bottom: Open With..., Move, +
+        -- Right bottom: Open With..., Move, Delete, +
         local plusX = w - (#plusLabel + 2)
-        local moveX = plusX - (#moveLabel + 2)
+        local delX = plusX - (#delLabel + 2)
+        local moveX = delX - (#moveLabel + 2)
         local openWithX = moveX - (#openWithLabel + 2)
-        drawClickableText(openWithX, btnY, openWithLabel, selectedIdx ~= nil)
+        drawClickableText(openWithX, btnY, openWithLabel, selectedIdx ~= nil and not btns[selectedIdx].isDir)
         drawClickableText(moveX, btnY, moveLabel, selectedIdx ~= nil)
+        drawClickableText(delX, btnY, delLabel, selectedIdx ~= nil)
         drawClickableText(plusX, btnY, plusLabel, false)
+    end
+
+    -- Диалог создания файла/папки с выбором типа
+    local function createFileDialog(currentPath)
+        local w, h = term.getSize()
+        clearScreen()
+        centerText(2, "Create File or Directory", PALETTE.accent)
+        centerText(4, "Enter name:", PALETTE.fg)
+        term.setCursorPos(4, 6)
+        term.write("Name: ")
+        local name = inputBox(11, 6, 24, false)
+        if name == "" then
+            centerText(8, "Name cannot be empty!", PALETTE.error)
+            sleep(1.5)
+            return
+        end
+        if name:find("[/\\]") then
+            centerText(8, "Invalid character in name!", PALETTE.error)
+            sleep(1.5)
+            return
+        end
+        local fullPath = fs.combine(currentPath, name)
+        if fs.exists(fullPath) then
+            centerText(8, "File or folder already exists!", PALETTE.error)
+            sleep(1.5)
+            return
+        end
+        -- Выбор типа: файл или папка
+        local fileLabel = "File"
+        local dirLabel = "Directory"
+        local fileX = math.floor(w/2) - #fileLabel - 4
+        local dirX = math.floor(w/2) + 4
+        local btnY = 10
+        drawClickableText(fileX, btnY, fileLabel, true)
+        drawClickableText(dirX, btnY, dirLabel, false)
+        centerText(btnY+2, "Click type to create", PALETTE.border)
+        while true do
+            local event, b, mx, my = os.pullEvent()
+            if event == "mouse_click" and b == 1 then
+                if isInClickable(mx, my, fileX, btnY, fileLabel) then
+                    -- Create file
+                    local f = fs.open(fullPath, "w")
+                    if f then f.close() end
+                    centerText(btnY+4, "File created!", PALETTE.accent)
+                    sleep(1)
+                    return
+                elseif isInClickable(mx, my, dirX, btnY, dirLabel) then
+                    -- Create directory
+                    pcall(fs.makeDir, fullPath)
+                    centerText(btnY+4, "Directory created!", PALETTE.accent)
+                    sleep(1)
+                    return
+                end
+            end
+        end
     end
 
     while not shouldExit do
@@ -862,13 +928,15 @@ local function fileManagerScreen(user)
             local plusLabel = "+"
             local openWithLabel = "Open With..."
             local moveLabel = "Move"
+            local delLabel = "Delete"
             local upLabel = "Up"
             local exitLabel = "Exit"
             local exitX = 2
             local upX = exitX + #exitLabel + 4
             local btnY = h-2
             local plusX = w - (#plusLabel + 2)
-            local moveX = plusX - (#moveLabel + 2)
+            local delX = plusX - (#delLabel + 2)
+            local moveX = delX - (#moveLabel + 2)
             local openWithX = moveX - (#openWithLabel + 2)
             -- "+" button
             if not handled and isInClickable(mx, my, plusX, btnY, plusLabel) then
@@ -876,15 +944,13 @@ local function fileManagerScreen(user)
                 handled = true
             end
             -- "Open With..." button
-            if not handled and isInClickable(mx, my, openWithX, btnY, openWithLabel) and selectedIdx then
+            if not handled and isInClickable(mx, my, openWithX, btnY, openWithLabel) and selectedIdx and not btns[selectedIdx].isDir then
                 local btn = btns[selectedIdx]
-                if btn and not btn.isDir then
-                    openWithMenu(
-                        fs.combine(currentPath, btn.file),
-                        isTextFile(btn.file),
-                        isExecutableFile(btn.file)
-                    )
-                end
+                openWithMenu(
+                    fs.combine(currentPath, btn.file),
+                    isTextFile(btn.file),
+                    isExecutableFile(btn.file)
+                )
                 handled = true
             end
             -- "Move" button
@@ -912,6 +978,35 @@ local function fileManagerScreen(user)
                         end
                         sleep(1)
                     end
+                end
+                handled = true
+            end
+            -- "Delete" button
+            if not handled and isInClickable(mx, my, delX, btnY, delLabel) and selectedIdx then
+                local btn = btns[selectedIdx]
+                local delPath = fs.combine(currentPath, btn.file)
+                centerText(h-3, "Delete '"..btn.file.."'? Click again to confirm.", PALETTE.error)
+                local ev, b2, mx2, my2 = os.pullEvent("mouse_click")
+                if b2 == 1 and isInClickable(mx2, my2, delX, btnY, delLabel) then
+                    if fs.isDir(delPath) then
+                        local function recursiveDelete(path)
+                            for _, f in ipairs(fs.list(path)) do
+                                local sub = fs.combine(path, f)
+                                if fs.isDir(sub) then
+                                    recursiveDelete(sub)
+                                else
+                                    fs.delete(sub)
+                                end
+                            end
+                            fs.delete(path)
+                        end
+                        recursiveDelete(delPath)
+                    else
+                        fs.delete(delPath)
+                    end
+                    centerText(h-3, "Deleted!", PALETTE.accent)
+                    selectedIdx = nil
+                    sleep(1)
                 end
                 handled = true
             end
@@ -948,45 +1043,6 @@ local function fileManagerScreen(user)
                 handled = true
             end
         end
-    end
-end
-
--- === CREATE FILE DIALOG ===
-local function createFileDialog(currentPath)
-    local w, h = term.getSize()
-    clearScreen()
-    centerText(2, "Create File or Directory", PALETTE.accent)
-    centerText(4, "Enter name (end with / for folder):", PALETTE.fg)
-    term.setCursorPos(4, 6)
-    term.write("Name: ")
-    local name = inputBox(11, 6, 24, false)
-    if name == "" then
-        centerText(8, "Name cannot be empty!", PALETTE.error)
-        sleep(1.5)
-        return
-    end
-    if name:find("[/\\]") and name:sub(-1) ~= "/" then
-        centerText(8, "Invalid character in name!", PALETTE.error)
-        sleep(1.5)
-        return
-    end
-    local fullPath = fs.combine(currentPath, name)
-    if fs.exists(fullPath) then
-        centerText(8, "File or folder already exists!", PALETTE.error)
-        sleep(1.5)
-        return
-    end
-    if name:sub(-1) == "/" then
-        -- Create directory
-        pcall(fs.makeDir, fullPath)
-        centerText(8, "Directory created!", PALETTE.accent)
-        sleep(1)
-    else
-        -- Create file
-        local f = fs.open(fullPath, "w")
-        if f then f.close() end
-        centerText(8, "File created!", PALETTE.accent)
-        sleep(1)
     end
 end
 
