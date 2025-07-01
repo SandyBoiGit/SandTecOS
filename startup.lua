@@ -867,6 +867,27 @@ local function fileManagerScreen(user)
     end
 end
 
+-- === OS DELETE UTILS ===
+local function deleteSandTecOS()
+    local function safeDelete(path)
+        if fs.exists(path) then
+            if fs.isDir(path) then
+                for _, f in ipairs(fs.list(path)) do
+                    safeDelete(fs.combine(path, f))
+                end
+                fs.delete(path)
+            else
+                fs.delete(path)
+            end
+        end
+    end
+    -- Удаляем все файлы и папки SandTecOS
+    safeDelete(USERS_FILE)
+    safeDelete(USERS_DIR)
+    safeDelete(shell.getRunningProgram()) -- startup.lua
+    -- Можно добавить другие связанные файлы, если есть
+end
+
 -- === DESKTOP ===
 local function desktopScreen(user)
     while true do
@@ -880,6 +901,16 @@ local function desktopScreen(user)
             {label="Logout", y=11}
         }
         drawMenu(menu, w)
+        -- Admin-only: красная кнопка "Delete OS"
+        local deleteLabel = "Delete OS"
+        local deleteX = w - #deleteLabel - 2
+        local deleteY = h
+        if user.admin then
+            term.setCursorPos(deleteX, deleteY)
+            term.setTextColor(PALETTE.error)
+            term.write(deleteLabel)
+            term.setTextColor(PALETTE.fg)
+        end
         local waiting = true
         local lastActivity = os.clock()
         while waiting do
@@ -895,6 +926,7 @@ local function desktopScreen(user)
                 lastActivity = os.clock()
             end
             if event == "mouse_click" and b == 1 then
+                -- Проверка нажатия на обычные пункты меню
                 local clickedLabel = getMenuClick(menu, mx, my, w)
                 if clickedLabel then
                     if clickedLabel == "File Manager" then
@@ -903,14 +935,58 @@ local function desktopScreen(user)
                         centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
                         centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
                         drawMenu(menu, w)
+                        if user.admin then
+                            term.setCursorPos(deleteX, deleteY)
+                            term.setTextColor(PALETTE.error)
+                            term.write(deleteLabel)
+                            term.setTextColor(PALETTE.fg)
+                        end
                     elseif clickedLabel == "Users" then
                         userManagerScreen(user.name)
                         clearScreen()
                         centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
                         centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
                         drawMenu(menu, w)
+                        if user.admin then
+                            term.setCursorPos(deleteX, deleteY)
+                            term.setTextColor(PALETTE.error)
+                            term.write(deleteLabel)
+                            term.setTextColor(PALETTE.fg)
+                        end
                     elseif clickedLabel == "Logout" then
                         return
+                    end
+                end
+                -- Проверка нажатия на красную кнопку удаления ОС
+                if user.admin and mx >= deleteX and mx < deleteX + #deleteLabel and my == deleteY then
+                    -- Подтверждение
+                    term.setCursorPos(2, h-1)
+                    term.setTextColor(PALETTE.error)
+                    term.write("Delete SandTecOS and ALL user data? Type YES to confirm: ")
+                    term.setTextColor(PALETTE.fg)
+                    local confirm = inputBox(2 + #"Delete SandTecOS and ALL user data? Type YES to confirm: ", h-1, 6, false)
+                    if confirm == "YES" then
+                        clearScreen()
+                        centerText(math.floor(h/2), "Deleting SandTecOS...", PALETTE.error)
+                        sleep(1)
+                        deleteSandTecOS()
+                        centerText(math.floor(h/2)+2, "System deleted. Rebooting...", PALETTE.error)
+                        sleep(2)
+                        os.reboot()
+                    else
+                        centerText(h-1, "Cancelled.", PALETTE.accent)
+                        sleep(1)
+                        -- Перерисовать экран
+                        clearScreen()
+                        centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
+                        centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
+                        drawMenu(menu, w)
+                        if user.admin then
+                            term.setCursorPos(deleteX, deleteY)
+                            term.setTextColor(PALETTE.error)
+                            term.write(deleteLabel)
+                            term.setTextColor(PALETTE.fg)
+                        end
                     end
                 end
             end
