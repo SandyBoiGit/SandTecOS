@@ -629,77 +629,131 @@ local function userManagerScreen(currentUser)
     end
 end
 
--- === FILE MANAGER ===
-
-local function isTextFile(filename)
-    -- Только текстовые файлы, не .lua/.exe
-    return filename:match("%.txt$") or filename:match("%.cfg$") or filename:match("%.log$") or filename:match("%.json$") or not filename:find("%.[^%.]+$")
-end
-
-local function isExecutableFile(filename)
-    return filename:match("%.lua$") or filename:match("%.exe$")
-end
-
-local function openWithMenu(filePath, isText, isExec)
-    local w, h = term.getSize()
-    local menu = {}
-    if isExec then
-        menu = {
-            {label="Run", y=math.floor(h/2)-1},
-            {label="Open in text editor", y=math.floor(h/2)+1}
-        }
-    else
-        menu = {
-            {label="Open in text editor", y=math.floor(h/2)-1}
-        }
+-- === FILE MOVE UTILS ===
+local function moveFileOrDir(src, dst)
+    if not fs.exists(src) then
+        return false, "Source does not exist"
     end
-    clearScreen()
-    centerText(math.floor(h/2)-3, "Open file: " .. fs.getName(filePath), PALETTE.accent)
-    drawMenu(menu, w)
+    if fs.exists(dst) then
+        return false, "Destination already exists"
+    end
+    local function recursiveCopy(s, d)
+        if fs.isDir(s) then
+            fs.makeDir(d)
+            for _, f in ipairs(fs.list(s)) do
+                local ok, err = recursiveCopy(fs.combine(s, f), fs.combine(d, f))
+                if not ok then return false, err end
+            end
+        else
+            local ok, err = pcall(fs.copy, s, d)
+            if not ok then return false, "Copy failed: " .. tostring(err) end
+        end
+        return true
+    end
+    local ok, err = recursiveCopy(src, dst)
+    if not ok then return false, err end
+    local ok2, err2 = pcall(fs.delete, src)
+    if not ok2 then return false, "Delete failed: " .. tostring(err2) end
+    return true
+end
+
+-- === DIRECTORY SELECTOR ===
+local function selectDirectoryDialog(startPath, user, userRoot)
+    local w, h = term.getSize()
+    local currentPath = startPath
     while true do
+        clearScreen()
+        centerText(2, "Select destination directory", PALETTE.accent)
+        term.setCursorPos(2, 4)
+        term.setTextColor(PALETTE.border)
+        term.write("Current: " .. currentPath)
+        term.setTextColor(PALETTE.fg)
+        local dirs = {}
+        local yStart = 6
+        for _, file in ipairs(fs.list(currentPath)) do
+            local full = fs.combine(currentPath, file)
+            if fs.isDir(full) then
+                table.insert(dirs, file)
+            end
+        end
+        table.sort(dirs)
+        local btns = {}
+        for i, dir in ipairs(dirs) do
+            local x = 4
+            local y = yStart + i - 1
+            drawClickableText(x, y, dir, false)
+            btns[i] = {x=x, y=y, label=dir, dir=dir}
+        end
+        -- Bottom buttons
+        local selectLabel = "Select"
+        local upLabel = "Up"
+        local cancelLabel = "Cancel"
+        local selectX = 2
+        local upX = selectX + #selectLabel + 4
+        local cancelX = upX + #upLabel + 4
+        local btnY = h-2
+        drawClickableText(selectX, btnY, selectLabel, false)
+        drawClickableText(upX, btnY, upLabel, false)
+        drawClickableText(cancelX, btnY, cancelLabel, false)
+        -- Wait for input
         local event, b, mx, my = os.pullEvent()
         if event == "mouse_click" and b == 1 then
-            local clickedLabel = getMenuClick(menu, mx, my, w)
-            if clickedLabel then
-                if clickedLabel == "Run" then
-                    clearScreen()
-                    shell.run(filePath)
-                    centerText(2, "Press any key to return...", PALETTE.select)
-                    os.pullEvent("key")
-                    break
-                elseif clickedLabel == "Open in text editor" then
-                    textEditorScreen(filePath)
-                    break
+            -- Directory click
+            for i, btn in ipairs(btns) do
+                if isInClickable(mx, my, btn.x, btn.y, btn.label) then
+                    local nextPath = fs.combine(currentPath, btn.dir)
+                    -- User restriction
+                    if not user.admin then
+                        local normNext = "/"..fs.combine(currentPath, btn.dir)
+                        local normRoot = "/"..userRoot
+                        if normNext:sub(1, #normRoot) ~= normRoot then
+                            centerText(h-3, "Access denied!", PALETTE.error)
+                            sleep(1)
+                        else
+                            currentPath = nextPath
+                        end
+                    else
+                        currentPath = nextPath
+                    end
                 end
             end
-        elseif event == "key" then
-            if b == keys.escape then break end
+            -- Select
+            if isInClickable(mx, my, selectX, btnY, selectLabel) then
+                return currentPath
+            end
+            -- Up
+            if isInClickable(mx, my, upX, btnY, upLabel) then
+                local rootPath = user.admin and "/" or userRoot
+                if currentPath ~= rootPath then
+                    local parent = fs.getDir(currentPath)
+                    if parent == "" then
+                        currentPath = rootPath
+                    else
+                        -- User restriction
+                        if not user.admin then
+                            local normParent = "/"..parent
+                            local normRoot = "/"..userRoot
+                            if normParent:sub(1, #normRoot) ~= normRoot then
+                                centerText(h-3, "Access denied!", PALETTE.error)
+                                sleep(1)
+                            else
+                                currentPath = parent
+                            end
+                        else
+                            currentPath = parent
+                        end
+                    end
+                end
+            end
+            -- Cancel
+            if isInClickable(mx, my, cancelX, btnY, cancelLabel) then
+                return nil
+            end
         end
     end
 end
 
-local function createFileDialog(currentPath)
-    local w, h = term.getSize()
-    clearScreen()
-    centerText(math.floor(h/2)-2, "Create file:", PALETTE.accent)
-    term.setCursorPos(math.floor(w/2)-10, math.floor(h/2))
-    term.write("Filename: ")
-    local filename = inputBox(math.floor(w/2), math.floor(h/2), 20, false)
-    if filename and filename ~= "" then
-        local fullPath = fs.combine(currentPath, filename)
-        if fs.exists(fullPath) then
-            centerText(math.floor(h/2)+2, "File already exists!", PALETTE.error)
-            sleep(1.5)
-            return
-        end
-        -- Create empty file
-        local f = fs.open(fullPath, "w")
-        if f then f.close() end
-        centerText(math.floor(h/2)+2, "File created: " .. filename, PALETTE.accent)
-        sleep(1)
-    end
-end
-
+-- === FILE MANAGER ===
 local function fileManagerScreen(user)
     local w, h = term.getSize()
     local userRoot = fs.combine(USERS_DIR, user.name)
@@ -738,6 +792,7 @@ local function fileManagerScreen(user)
         -- Draw bottom buttons
         local plusLabel = "+"
         local openWithLabel = "Open With..."
+        local moveLabel = "Move"
         local upLabel = "Up"
         local exitLabel = "Exit"
         -- Left bottom: Exit, Up
@@ -746,10 +801,12 @@ local function fileManagerScreen(user)
         local btnY = h-2
         drawClickableText(exitX, btnY, exitLabel, false)
         drawClickableText(upX, btnY, upLabel, false)
-        -- Right bottom: Open With..., +
+        -- Right bottom: Open With..., Move, +
         local plusX = w - (#plusLabel + 2)
-        local openWithX = plusX - (#openWithLabel + 2)
+        local moveX = plusX - (#moveLabel + 2)
+        local openWithX = moveX - (#openWithLabel + 2)
         drawClickableText(openWithX, btnY, openWithLabel, selectedIdx ~= nil)
+        drawClickableText(moveX, btnY, moveLabel, selectedIdx ~= nil)
         drawClickableText(plusX, btnY, plusLabel, false)
     end
 
@@ -804,13 +861,15 @@ local function fileManagerScreen(user)
             -- Bottom buttons
             local plusLabel = "+"
             local openWithLabel = "Open With..."
+            local moveLabel = "Move"
             local upLabel = "Up"
             local exitLabel = "Exit"
             local exitX = 2
             local upX = exitX + #exitLabel + 4
             local btnY = h-2
             local plusX = w - (#plusLabel + 2)
-            local openWithX = plusX - (#openWithLabel + 2)
+            local moveX = plusX - (#moveLabel + 2)
+            local openWithX = moveX - (#openWithLabel + 2)
             -- "+" button
             if not handled and isInClickable(mx, my, plusX, btnY, plusLabel) then
                 createFileDialog(currentPath)
@@ -828,18 +887,43 @@ local function fileManagerScreen(user)
                 end
                 handled = true
             end
+            -- "Move" button
+            if not handled and isInClickable(mx, my, moveX, btnY, moveLabel) and selectedIdx then
+                local btn = btns[selectedIdx]
+                local srcPath = fs.combine(currentPath, btn.file)
+                -- Выбор директории назначения
+                local dstDir = selectDirectoryDialog(user.admin and "/" or userRoot, user, userRoot)
+                if dstDir then
+                    local dstPath = fs.combine(dstDir, btn.file)
+                    if dstPath == srcPath then
+                        centerText(h-3, "Cannot move to same location!", PALETTE.error)
+                        sleep(1)
+                    elseif fs.exists(dstPath) then
+                        centerText(h-3, "Destination exists!", PALETTE.error)
+                        sleep(1)
+                    else
+                        centerText(h-3, "Moving...", PALETTE.select)
+                        local ok, err = moveFileOrDir(srcPath, dstPath)
+                        if ok then
+                            centerText(h-3, "Moved successfully!", PALETTE.accent)
+                            selectedIdx = nil
+                        else
+                            centerText(h-3, "Move failed: "..(err or ""), PALETTE.error)
+                        end
+                        sleep(1)
+                    end
+                end
+                handled = true
+            end
             -- "Up" button
             if not handled and isInClickable(mx, my, upX, btnY, upLabel) then
                 local rootPath = user.admin and "/" or userRoot
-                -- Проверяем, не находимся ли уже в корне
                 if currentPath ~= rootPath then
                     local parent = fs.getDir(currentPath)
-                    -- Если parent пустой строки, значит мы в "/" и не двигаемся выше
                     if parent == "" then
                         currentPath = rootPath
                         selectedIdx = nil
                     else
-                        -- Ограничение для обычных пользователей: нельзя выйти за пределы своей папки
                         if not user.admin then
                             local normParent = "/"..parent
                             local normRoot = "/"..userRoot
