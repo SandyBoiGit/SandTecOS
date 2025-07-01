@@ -1128,7 +1128,7 @@ function registerScreen()
     UserManager.save(users)
     UserManager.createUserDir(username)
     centerText(10, "User registered!", PALETTE.accent)
-    centerText(12, "Перезапустите компьютер для применения", PALETTE.select)
+    centerText(12, "Please reboot the computer to apply changes", PALETTE.select)
     sleep(3)
 end
 
