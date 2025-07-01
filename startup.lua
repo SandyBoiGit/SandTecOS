@@ -1043,7 +1043,6 @@ local function authScreen()
         if #users == 0 then
             menu = {
                 {label="Register", y=yStart}
-                -- Exit button removed
             }
         else
             -- Список пользователей
@@ -1054,7 +1053,6 @@ local function authScreen()
                 table.insert(menu, {label=label, y=yStart+i-1, username=user.name})
             end
             table.insert(menu, {label="Register", y=yStart+#users+2})
-            -- Exit button removed
         end
         drawMenu(menu, w)
         while true do
@@ -1065,7 +1063,7 @@ local function authScreen()
                     if isInClickable(mx, my, x, item.y, item.label) then
                         if item.label == "Register" then
                             registerScreen()
-                            break
+                            break -- <--- Важно! После регистрации возвращаемся к authScreen
                         elseif item.username then
                             -- Выбран пользователь
                             local users = UserManager.load()
@@ -1141,8 +1139,9 @@ function registerScreen()
     while true do
         local event, button, mx, my = os.pullEvent()
         if event == "mouse_click" and button == 1 then
+            -- Проверяем попадание по кнопке
             if my == restartY and mx >= restartX and mx < restartX + #restartLabel then
-                return true -- выход из registerScreen, возврат к authScreen
+                break -- <--- Просто break, чтобы выйти из registerScreen
             end
         end
     end
