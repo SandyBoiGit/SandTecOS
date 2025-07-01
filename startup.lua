@@ -1128,23 +1128,8 @@ function registerScreen()
     UserManager.save(users)
     UserManager.createUserDir(username)
     centerText(10, "User registered!", PALETTE.accent)
-    -- Кнопка Restart
-    local restartLabel = "Restart"
-    local restartX = math.floor((w - #restartLabel) / 2) + 1
-    local restartY = h - 2
-    term.setCursorPos(restartX, restartY)
-    term.setTextColor(PALETTE.accent)
-    term.write(restartLabel)
-    term.setTextColor(PALETTE.fg)
-    while true do
-        local event, button, mx, my = os.pullEvent()
-        if event == "mouse_click" and button == 1 then
-            -- Проверяем попадание по кнопке
-            if my == restartY and mx >= restartX and mx < restartX + #restartLabel then
-                break -- <--- Просто break, чтобы выйти из registerScreen
-            end
-        end
-    end
+    centerText(12, "Перезапустите компьютер для применения", PALETTE.select)
+    sleep(3)
 end
 
 -- === MAIN LOOP ===
