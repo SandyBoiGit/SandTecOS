@@ -959,13 +959,48 @@ local function desktopScreen(user)
                 end
                 -- Проверка нажатия на красную кнопку удаления ОС
                 if user.admin and mx >= deleteX and mx < deleteX + #deleteLabel and my == deleteY then
-                    -- Подтверждение
-                    term.setCursorPos(2, h-1)
-                    term.setTextColor(PALETTE.error)
-                    term.write("Delete SandTecOS and ALL user data? Type YES to confirm: ")
-                    term.setTextColor(PALETTE.fg)
-                    local confirm = inputBox(2 + #"Delete SandTecOS and ALL user data? Type YES to confirm: ", h-1, 6, false)
-                    if confirm == "YES" then
+                    -- Новый диалог подтверждения
+                    local confirm = false
+                    while true do
+                        clearScreen()
+                        centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
+                        centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
+                        drawMenu(menu, w)
+                        -- Кнопка Delete OS
+                        term.setCursorPos(deleteX, deleteY)
+                        term.setTextColor(PALETTE.error)
+                        term.write(deleteLabel)
+                        term.setTextColor(PALETTE.fg)
+                        -- Диалог подтверждения
+                        local dialogY = math.max(deleteY - 4, 13)
+                        centerText(dialogY, "Are you sure?", PALETTE.error)
+                        local yesLabel = "Yes"
+                        local noLabel = "No"
+                        local btnY = dialogY + 2
+                        local yesX = math.floor(w/2) - 5
+                        local noX = math.floor(w/2) + 3
+                        -- Yes (красная)
+                        term.setCursorPos(yesX, btnY)
+                        term.setTextColor(PALETTE.error)
+                        term.write(yesLabel)
+                        -- No (обычная)
+                        term.setCursorPos(noX, btnY)
+                        term.setTextColor(PALETTE.fg)
+                        term.write(noLabel)
+                        term.setTextColor(PALETTE.fg)
+                        -- Ждём клик
+                        local ev, btn, mx2, my2 = os.pullEvent("mouse_click")
+                        if my2 == btnY then
+                            if mx2 >= yesX and mx2 < yesX + #yesLabel then
+                                confirm = true
+                                break
+                            elseif mx2 >= noX and mx2 < noX + #noLabel then
+                                confirm = false
+                                break
+                            end
+                        end
+                    end
+                    if confirm then
                         clearScreen()
                         centerText(math.floor(h/2), "Deleting SandTecOS...", PALETTE.error)
                         sleep(1)
