@@ -888,6 +888,238 @@ local function deleteSandTecOS()
     -- Можно добавить другие связанные файлы, если есть
 end
 
+-- === APPVIEW SCREEN ===
+local function appViewScreen(user)
+    local APPS_DIR = "/Apps"
+    local function getAppsList()
+        local apps = {}
+        if fs.exists(APPS_DIR) and fs.isDir(APPS_DIR) then
+            for _, file in ipairs(fs.list(APPS_DIR)) do
+                local path = fs.combine(APPS_DIR, file)
+                if not fs.isDir(path) and (file:match("%.lua$") or file:match("%.exe$")) then
+                    table.insert(apps, {
+                        name = file:gsub("%.lua$", ""):gsub("%.exe$", ""),
+                        file = file,
+                        path = path
+                    })
+                end
+            end
+        end
+        table.sort(apps, function(a, b) return a.name:lower() < b.name:lower() end)
+        return apps
+    end
+
+    local function drawAppButtons(apps, selectedIdx)
+        local w, h = term.getSize()
+        local btnSize = 12
+        local btnPad = 3
+        local cols = math.floor((w - btnPad) / (btnSize + btnPad))
+        if cols < 1 then cols = 1 end
+        local rows = math.ceil(#apps / cols)
+        local startY = 4
+        local startX = math.floor((w - (cols * btnSize + (cols-1)*btnPad)) / 2) + 1
+
+        clearScreen()
+        centerText(2, OS_NAME .. " - AppView", PALETTE.accent)
+        centerText(3, "Click an app to launch", PALETTE.border)
+        for i, app in ipairs(apps) do
+            local col = ((i-1) % cols)
+            local row = math.floor((i-1) / cols)
+            local x = startX + col * (btnSize + btnPad)
+            local y = startY + row * (btnSize + btnPad)
+            -- Draw button background
+            for dy = 0, btnSize-1 do
+                term.setCursorPos(x, y+dy)
+                if selectedIdx == i then
+                    term.setBackgroundColor(PALETTE.select)
+                else
+                    term.setBackgroundColor(PALETTE.bg)
+                end
+                term.write(string.rep(" ", btnSize))
+            end
+            -- Draw app name centered
+            local label = app.name
+            local labelY = y + math.floor(btnSize/2)
+            term.setCursorPos(x + math.floor((btnSize-#label)/2), labelY)
+            term.setTextColor(PALETTE.fg)
+            term.write(label)
+            term.setTextColor(PALETTE.fg)
+            term.setBackgroundColor(PALETTE.bg)
+        end
+        -- Draw Exit button
+        local exitLabel = "Exit"
+        local exitX = 2
+        local exitY = h-2
+        drawClickableText(exitX, exitY, exitLabel, false)
+    end
+
+    local function getAppByCoords(apps, mx, my)
+        local w, h = term.getSize()
+        local btnSize = 12
+        local btnPad = 3
+        local cols = math.floor((w - btnPad) / (btnSize + btnPad))
+        if cols < 1 then cols = 1 end
+        local startY = 4
+        local startX = math.floor((w - (cols * btnSize + (cols-1)*btnPad)) / 2) + 1
+        for i, app in ipairs(apps) do
+            local col = ((i-1) % cols)
+            local row = math.floor((i-1) / cols)
+            local x = startX + col * (btnSize + btnPad)
+            local y = startY + row * (btnSize + btnPad)
+            if mx >= x and mx < x + btnSize and my >= y and my < y + btnSize then
+                return i, app
+            end
+        end
+        return nil, nil
+    end
+
+    local apps = getAppsList()
+    local selectedIdx = nil
+    drawAppButtons(apps, selectedIdx)
+    while true do
+        local event, b, mx, my = os.pullEvent()
+        if event == "mouse_click" and b == 1 then
+            -- Exit button
+            local w, h = term.getSize()
+            if my == h-2 and mx >= 2 and mx < 2 + #"Exit" then
+                break
+            end
+            -- App buttons
+            local idx, app = getAppByCoords(apps, mx, my)
+            if idx and app then
+                selectedIdx = idx
+                drawAppButtons(apps, selectedIdx)
+                clearScreen()
+                centerText(2, "Launching: " .. app.name, PALETTE.accent)
+                sleep(0.5)
+                shell.run(app.path)
+                centerText(h-2, "Press any key to return to AppView...", PALETTE.select)
+                os.pullEvent("key")
+                selectedIdx = nil
+                drawAppButtons(apps, selectedIdx)
+            end
+        elseif event == "key" and b == keys.escape then
+            break
+        end
+    end
+end
+
+-- === APPVIEW SCREEN ===
+local function appViewScreen(user)
+    local APPS_DIR = "/Apps"
+    local function getAppsList()
+        local apps = {}
+        if fs.exists(APPS_DIR) and fs.isDir(APPS_DIR) then
+            for _, file in ipairs(fs.list(APPS_DIR)) do
+                local path = fs.combine(APPS_DIR, file)
+                if not fs.isDir(path) and (file:match("%.lua$") or file:match("%.exe$")) then
+                    table.insert(apps, {
+                        name = file:gsub("%.lua$", ""):gsub("%.exe$", ""),
+                        file = file,
+                        path = path
+                    })
+                end
+            end
+        end
+        table.sort(apps, function(a, b) return a.name:lower() < b.name:lower() end)
+        return apps
+    end
+
+    local function drawAppButtons(apps, selectedIdx)
+        local w, h = term.getSize()
+        local btnSize = 12
+        local btnPad = 3
+        local cols = math.floor((w - btnPad) / (btnSize + btnPad))
+        if cols < 1 then cols = 1 end
+        local rows = math.ceil(#apps / cols)
+        local startY = 4
+        local startX = math.floor((w - (cols * btnSize + (cols-1)*btnPad)) / 2) + 1
+
+        clearScreen()
+        centerText(2, OS_NAME .. " - AppView", PALETTE.accent)
+        centerText(3, "Click an app to launch", PALETTE.border)
+        for i, app in ipairs(apps) do
+            local col = ((i-1) % cols)
+            local row = math.floor((i-1) / cols)
+            local x = startX + col * (btnSize + btnPad)
+            local y = startY + row * (btnSize + btnPad)
+            -- Draw button background
+            for dy = 0, btnSize-1 do
+                term.setCursorPos(x, y+dy)
+                if selectedIdx == i then
+                    term.setBackgroundColor(PALETTE.select)
+                else
+                    term.setBackgroundColor(PALETTE.bg)
+                end
+                term.write(string.rep(" ", btnSize))
+            end
+            -- Draw app name centered
+            local label = app.name
+            local labelY = y + math.floor(btnSize/2)
+            term.setCursorPos(x + math.floor((btnSize-#label)/2), labelY)
+            term.setTextColor(PALETTE.fg)
+            term.write(label)
+            term.setTextColor(PALETTE.fg)
+            term.setBackgroundColor(PALETTE.bg)
+        end
+        -- Draw Exit button
+        local exitLabel = "Exit"
+        local exitX = 2
+        local exitY = h-2
+        drawClickableText(exitX, exitY, exitLabel, false)
+    end
+
+    local function getAppByCoords(apps, mx, my)
+        local w, h = term.getSize()
+        local btnSize = 12
+        local btnPad = 3
+        local cols = math.floor((w - btnPad) / (btnSize + btnPad))
+        if cols < 1 then cols = 1 end
+        local startY = 4
+        local startX = math.floor((w - (cols * btnSize + (cols-1)*btnPad)) / 2) + 1
+        for i, app in ipairs(apps) do
+            local col = ((i-1) % cols)
+            local row = math.floor((i-1) / cols)
+            local x = startX + col * (btnSize + btnPad)
+            local y = startY + row * (btnSize + btnPad)
+            if mx >= x and mx < x + btnSize and my >= y and my < y + btnSize then
+                return i, app
+            end
+        end
+        return nil, nil
+    end
+
+    local apps = getAppsList()
+    local selectedIdx = nil
+    drawAppButtons(apps, selectedIdx)
+    while true do
+        local event, b, mx, my = os.pullEvent()
+        if event == "mouse_click" and b == 1 then
+            -- Exit button
+            local w, h = term.getSize()
+            if my == h-2 and mx >= 2 and mx < 2 + #"Exit" then
+                break
+            end
+            -- App buttons
+            local idx, app = getAppByCoords(apps, mx, my)
+            if idx and app then
+                selectedIdx = idx
+                drawAppButtons(apps, selectedIdx)
+                clearScreen()
+                centerText(2, "Launching: " .. app.name, PALETTE.accent)
+                sleep(0.5)
+                shell.run(app.path)
+                centerText(h-2, "Press any key to return to AppView...", PALETTE.select)
+                os.pullEvent("key")
+                selectedIdx = nil
+                drawAppButtons(apps, selectedIdx)
+            end
+        elseif event == "key" and b == keys.escape then
+            break
+        end
+    end
+end
+
 -- === DESKTOP ===
 local function desktopScreen(user)
     while true do
@@ -897,8 +1129,9 @@ local function desktopScreen(user)
         centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
         local menu = {
             {label="File Manager", y=7},
-            {label="Users", y=9},
-            {label="Logout", y=11}
+            {label="AppView", y=9},
+            {label="Users", y=11},
+            {label="Logout", y=13}
         }
         drawMenu(menu, w)
         -- Admin-only: красная кнопка "Delete OS"
@@ -926,11 +1159,22 @@ local function desktopScreen(user)
                 lastActivity = os.clock()
             end
             if event == "mouse_click" and b == 1 then
-                -- Проверка нажатия на обычные пункты меню
                 local clickedLabel = getMenuClick(menu, mx, my, w)
                 if clickedLabel then
                     if clickedLabel == "File Manager" then
                         fileManagerScreen(user)
+                        clearScreen()
+                        centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
+                        centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
+                        drawMenu(menu, w)
+                        if user.admin then
+                            term.setCursorPos(deleteX, deleteY)
+                            term.setTextColor(PALETTE.error)
+                            term.write(deleteLabel)
+                            term.setTextColor(PALETTE.fg)
+                        end
+                    elseif clickedLabel == "AppView" then
+                        appViewScreen(user)
                         clearScreen()
                         centerText(2, OS_NAME .. " - Desktop", PALETTE.accent)
                         centerText(4, "User: " .. user.name .. (user.admin and " [admin]" or ""), PALETTE.border)
@@ -1063,7 +1307,7 @@ local function authScreen()
                     if isInClickable(mx, my, x, item.y, item.label) then
                         if item.label == "Register" then
                             registerScreen()
-                            break -- <--- Важно! После регистрации возвращаемся к authScreen
+                            break 
                         elseif item.username then
                             -- Выбран пользователь
                             local users = UserManager.load()
